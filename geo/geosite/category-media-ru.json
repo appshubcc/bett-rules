@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "russiatoday.com",
+        "rteam.tech",
+        "shop-rt.com",
+        "swentr.site"
+      ]
+    }
+  ]
+}

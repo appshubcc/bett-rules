@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "chrome",
+        "librewolf.net",
+        "censorship.no",
+        "basilisk-browser.org",
+        "brave.com",
+        "minbrowser.org",
+        "torproject.org",
+        "cromite.org",
+        "decentr.net",
+        "dothq.org",
+        "floorp.app",
+        "iridiumbrowser.de",
+        "kiwibrowser.com",
+        "chromium.org",
+        "kmeleonbrowser.org",
+        "bromite.org",
+        "netsurf-browser.org",
+        "opera.com",
+        "palemoon.org",
+        "pulsebrowser.app",
+        "qutebrowser.org",
+        "vivaldi.com",
+        "waterfox.net",
+        "zen-browser.app",
+        "chrome.com",
+        "epicbrowser.com",
+        "firefox.com",
+        "firefoxusercontent.com",
+        "browser.kagi.com"
+      ]
+    }
+  ]
+}
