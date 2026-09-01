@@ -1,7 +1,7 @@
 ## **下载地址**：
 
-| 文件名              | Github                                                                                                                    | JSdelivr                                                                                                                           | Cloudflare                                                                                                                               | Fastly                                                                                                                              | Gcore                                                                                                                              |
-|---------------------|---------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------|
+| 文件名 | GitHub | jsDelivr | jsDelivr<br>(Cloudflare) | jsDelivr<br>(Fastly) | jsDelivr<br>(Gcore) |
+|:-------|:------:|:--------:|:---------------------:|:------------------:|:-----------------:|
 | country.mmdb        | [下载](https://github.com/appshubcc/bett-rules/releases/download/latest/country.mmdb)                                 | [下载](https://cdn.jsdelivr.net/gh/appshubcc/bett-rules@release/country.mmdb)                                                   | [下载](https://testingcf.jsdelivr.net/gh/appshubcc/bett-rules@release/country.mmdb)                                                  | [下载](https://fastly.jsdelivr.net/gh/appshubcc/bett-rules@release/country.mmdb)                                                | [下载](https://gcore.jsdelivr.net/gh/appshubcc/bett-rules@release/country.mmdb)                                                |
 | geoip.dat           | [下载](https://github.com/appshubcc/bett-rules/releases/download/latest/geoip.dat)                                    | [下载](https://cdn.jsdelivr.net/gh/appshubcc/bett-rules@release/geoip.dat)                                                     | [下载](https://testingcf.jsdelivr.net/gh/appshubcc/bett-rules@release/geoip.dat)                                                    | [下载](https://fastly.jsdelivr.net/gh/appshubcc/bett-rules@release/geoip.dat)                                                   | [下载](https://gcore.jsdelivr.net/gh/appshubcc/bett-rules@release/geoip.dat)                                                   |
 | geoip.db            | [下载](https://github.com/appshubcc/bett-rules/releases/download/latest/geoip.db)                                     | [下载](https://cdn.jsdelivr.net/gh/appshubcc/bett-rules@release/geoip.db)                                                      | [下载](https://testingcf.jsdelivr.net/gh/appshubcc/bett-rules@release/geoip.db)                                                     | [下载](https://fastly.jsdelivr.net/gh/appshubcc/bett-rules@release/geoip.db)                                                    | [下载](https://gcore.jsdelivr.net/gh/appshubcc/bett-rules@release/geoip.db)                                                    |
@@ -22,11 +22,11 @@
 
 mihomo：[meta branch](https://github.com/appshubcc/bett-rules/tree/meta)
 
-sing-box: [sing branch](https://github.com/appshubcc/bett-rules/tree/sing)
+sing-box：[sing branch](https://github.com/appshubcc/bett-rules/tree/sing)
 
 ## **country.mmdb, geoip.dat, geoip.db, geoip.metadb 内容**
 
-包含全球所有国家/地区代码以及保留网段 (`geoip:private`)。
+包含全球所有国家/地区代码以及保留网段 `geoip:private`
 
 - 新增类别（方便有特殊需求的用户使用，均已严格去除 CN 节点）：
   - `geoip:apple`
@@ -48,7 +48,7 @@ sing-box: [sing branch](https://github.com/appshubcc/bett-rules/tree/sing)
 
 ## **country-lite.mmdb, geoip-lite.dat, geoip-lite.db, geoip-lite.metadb 内容**
 
-默认仅包含 CN 与 Private 保留网段，精简体积。
+默认仅包含 CN 与 Private 保留网段，精简体积
 
 - 新增类别（方便有特殊需求的用户使用，均已严格去除 CN 节点）：
   - `geoip:apple`
@@ -73,19 +73,19 @@ sing-box: [sing branch](https://github.com/appshubcc/bett-rules/tree/sing)
 - `GeoLite2-ASN.mmdb`：包含全球 8.5 万+ ASN 的全量自治域路由数据库。
 - `GeoLite2-ASN-lite.mmdb`：轻量版本，仅收录上述大厂核心业务 ASN 段。
 
-## **geosite.dat,geosite.db 内容**
+## **geosite.dat, geosite.db 内容**
 
 用法同 [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat)
 
-- `geosite:category-ads-all` 使用域名作为广告拦截用途作用有限，且可能会产生一定的副作用，此处仅额外添加个人收集部分域名，整体保持精简
+- `geosite:category-ads-all` 使用域名作为广告拦截用途作用有限，且可能会产生一定的副作用，此处仅额外添加个人收集部分域名，整体保持精简。
 - `geosite:cn` 源替换为 [dnsmasq-china-list/accelerated-domains.china.conf](https://github.com/felixonmars/dnsmasq-china-list)
 - `geosite:onedrive` 合并 [ios_rule_script/OneDrive](https://github.com/blackmatrix7/ios_rule_script/tree/master/rule/Clash/OneDrive)
-- `geosite:steam@cn` 合并 [ios_rule_script/SteamCN](https://github.com/blackmatrix7/ios_rule_script/tree/master/rule/Clash/SteamCN) 的内数据
-- 新增类别 - `geosite:biliintl` 来源 [biliintl](https://raw.githubusercontent.com/xishang0128/rules/main/biliintl.list) - `geosite:tracker` 来源 [TrackersList](https://trackerslist.com/#/zh)以及[blackmatrix7/ios_rule_script](https://github.com/blackmatrix7/ios_rule_script/tree/master/rule/Clash/PrivateTracker)
+- `geosite:steam@cn` 合并 [ios_rule_script/SteamCN](https://github.com/blackmatrix7/ios_rule_script/tree/master/rule/Clash/SteamCN) 中的数据。
+- 新增类别 - `geosite:biliintl` 来源 [biliintl](https://raw.githubusercontent.com/xishang0128/rules/main/biliintl.list) - `geosite:tracker` 来源 [TrackersList](https://trackerslist.com/#/zh) 以及 [blackmatrix7/ios_rule_script](https://github.com/blackmatrix7/ios_rule_script/tree/master/rule/Clash/PrivateTracker)
 
-## **geosite-lite.dat,geosite-lite.db 内容**
+## **geosite-lite.dat, geosite-lite.db 内容**
 
-仅包含常用集合，cn 为精简集合，可能不全
+仅包含常用集合，`cn` 为精简集合，可能不全。
 集合内容均来自 https://github.com/blackmatrix7/ios_rule_script/tree/master/rule/Clash
 
 集合包含 `abema / apple / applemusic / bilibili / biliintl / bahamut / cn / ehentai / google / github / microsoft / netflix / openai / onedrive / pixiv / proxy / spotify / telegram / twitter / tiktok / youtube / proxymedia`
@@ -128,7 +128,7 @@ rules:
   - GEOSITE,geolocation-!cn,PROXY
   - GEOSITE,cn,DIRECT
 
-  #GEOIP 规则
+  # GEOIP 规则
   - GEOIP,private,DIRECT,no-resolve
   - GEOIP,telegram,PROXY
   - GEOIP,JP,PROXY
@@ -139,7 +139,7 @@ rules:
 
 ## **Mihomo (Clash.Meta) geox-url 配置指南**
 
-默认采用高效 MMDB / MetaDB 模式（`geodata-mode: false`），在此模式下 **`geoip.metadb` 须填写在 `geox-url.mmdb` 字段**中。
+默认采用高效 MMDB / MetaDB 模式（`geodata-mode: false`），在此模式下 **`geoip.metadb` 须填写在 `geox-url.mmdb` 字段**中
 
 ### 1. 全量版
 
