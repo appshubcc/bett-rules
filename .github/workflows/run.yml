@@ -119,12 +119,13 @@ jobs:
           python ./resouces/removeFrom.py -remove ./resouces/reject-need-to-remove.txt -from ./reject-list-without-redundant -out ./temp-reject.txt
           cat ./temp-reject.txt >> ./community/data/category-ads
 
-      - name: Remove domains end with ".cn" in "temp-geolocation-!cn.txt" and write lists to data directory
+      - name: Deduplicate and optimize `cn` and `geolocation-!cn` lists with TLD rules
         run: |
-          cat temp-cn.txt | grep -v google | grep -v manhua | grep -v ooklaserver | grep -v "acg.rip" | sort --ignore-case -u | perl -ne '/^((?=^.{1,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})*)/ && print "$1\n"' > ./community/data/cn
-          cat temp-cn.txt | sort --ignore-case -u | perl -ne 'print if not /^((?=^.{3,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})+)/' > direct-tld-list.txt
-          cat temp-geolocation-\!cn.txt | sort --ignore-case -u | perl -ne '/^((?=^.{1,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})*)/ && print "$1\n"' | perl -ne 'print if not /\.cn$/' > ./community/data/geolocation-\!cn
-          cat temp-geolocation-\!cn.txt | sort --ignore-case -u | perl -ne 'print if not /^((?=^.{3,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})+)/' > proxy-tld-list.txt
+          cat temp-cn.txt | grep -v google | grep -v manhua | grep -v ooklaserver | grep -v "acg.rip" | sort --ignore-case -u | perl -ne '/^((?=^.{1,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})*)/ && print "$1\n"' > temp-cn-sorted.txt
+          python ./resouces/dedupTLD.py --mode cn --input temp-cn-sorted.txt --output ./community/data/cn --tld-cn ./resouces/tld-cn.txt --tld-not-cn ./resouces/tld-not-cn.txt
+
+          cat temp-geolocation-\!cn.txt | sort --ignore-case -u | perl -ne '/^((?=^.{1,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})*)/ && print "$1\n"' > temp-proxy-sorted.txt
+          python ./resouces/dedupTLD.py --mode proxy --input temp-proxy-sorted.txt --output ./community/data/geolocation-\!cn --tld-not-cn ./resouces/tld-not-cn.txt --tld-cn ./resouces/tld-cn.txt
 
       - name: Add `full`, `regexp` and `keyword` type of rules back into "cn", and "geolocation-!cn" list
         run: |
@@ -162,6 +163,7 @@ jobs:
           curl -sSL https://gitea.com/XIU2/TrackersListCollection/raw/branch/master/all.txt | grep -i "\.[A-Z]" | grep -v tracker | sed 's/^.*\/\///g' | sed 's/:.*\/.*//g' >> ./community/data/tracker
           curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/BlockHttpDNS/BlockHttpDNS.list | ${{ env.SED }} > ./community/data/httpdns
           echo "zed.dev" >> ./community/data/category-dev
+          python ./resouces/formatFakeIP.py ./resouces/fakeip-filter.txt ./community/data/fakeip-filter
 
       - name: Build geosite.dat file
         run: |
@@ -182,7 +184,8 @@ jobs:
           curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/AppleMusic/AppleMusic.yaml | ${{ env.SED }} > ./data-lite/applemusic
           curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/BiliBili/BiliBili.yaml | ${{ env.SED }} > ./data-lite/bilibili
           curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Bahamut/Bahamut.yaml | ${{ env.SED }} > ./data-lite/bahamut
-          curl -sSL $CHINA_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "$1\n"' | grep -v "acg.rip" | sort --ignore-case -u > ./data-lite/cn
+          curl -sSL $CHINA_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "$1\n"' | grep -v "acg.rip" | sort --ignore-case -u > ./data-lite/cn-raw
+          python ../resouces/dedupTLD.py --mode cn --input ./data-lite/cn-raw --output ./data-lite/cn --tld-cn ../resouces/tld-cn.txt --tld-not-cn ../resouces/tld-not-cn.txt --direct ../resouces/direct.txt
           curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Cloudflare/Cloudflare.yaml | ${{ env.SED }} > ./data-lite/cloudflare
           curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Google/Google.yaml | ${{ env.SED }} > ./data-lite/google
           curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/GitHub/GitHub.yaml | ${{ env.SED }} > ./data-lite/github
@@ -203,6 +206,7 @@ jobs:
           echo ipleak.net >> ./data-lite/proxy && echo browserleaks.org >> ./data-lite/proxy
           echo "full:o33249.ingest.sentry.io" >>  ./data-lite/openai
           echo "openai.com" >> ./data-lite/openai
+          python ../resouces/formatFakeIP.py ../resouces/fakeip-filter.txt ./data-lite/fakeip-filter
           go run ./ --datapath=./data-lite --outputname geosite-lite.dat
 
       - name: Download IPinfo Lite CSV database
@@ -260,6 +264,18 @@ jobs:
           go run ./ geosite -f ../community/geosite-lite.dat -o ../meta-rule/geo-lite/geosite
           go run ./ geoip -f ../publish/geoip-lite.dat -o ../meta-rule/geo-lite/geoip
 
+      - name: Generate fakeip-filter ruleset for meta and release
+        run: |
+          mihomo_version=$(curl -sSL https://api.github.com/repos/MetaCubeX/mihomo/releases | grep 'tag_name' | grep -v 'Alpha' | head -n 1 | sed -e 's/.*v/v/' -e 's/".*//')
+          curl -sSL "https://github.com/MetaCubeX/mihomo/releases/download/${mihomo_version}/mihomo-linux-amd64-${mihomo_version}.gz" | gzip -d > ./mihomo
+          chmod +x ./mihomo
+          python ./resouces/formatFakeIP.py --gen-ruleset ./resouces/fakeip-filter.txt ./meta-rule/geo/geosite
+          ./mihomo convert-ruleset domain text ./meta-rule/geo/geosite/fakeip-filter.list ./meta-rule/geo/geosite/fakeip-filter.mrs
+          cp ./meta-rule/geo/geosite/fakeip-filter.* ./meta-rule/geo-lite/geosite/
+          mkdir -p ./publish/
+          cp ./meta-rule/geo/geosite/fakeip-filter.* ./publish/
+          [ -f "./sing-rule/geo/geosite/fakeip-filter.srs" ] && cp ./sing-rule/geo/geosite/fakeip-filter.* ./publish/
+
       - name: Convert asn
         env:
           NO_SKIP: true
@@ -311,6 +327,11 @@ jobs:
           sha256sum BundleMRS.7z > BundleMRS.7z.sha256sum
           sha256sum GeoLite2-ASN.mmdb > GeoLite2-ASN.mmdb.sha256sum
           sha256sum GeoLite2-ASN-lite.mmdb > GeoLite2-ASN-lite.mmdb.sha256sum
+          [ -f "fakeip-filter.mrs" ] && sha256sum fakeip-filter.mrs > fakeip-filter.mrs.sha256sum
+          [ -f "fakeip-filter.list" ] && sha256sum fakeip-filter.list > fakeip-filter.list.sha256sum
+          [ -f "fakeip-filter.yaml" ] && sha256sum fakeip-filter.yaml > fakeip-filter.yaml.sha256sum
+          [ -f "fakeip-filter.srs" ] && sha256sum fakeip-filter.srs > fakeip-filter.srs.sha256sum
+          [ -f "fakeip-filter.json" ] && sha256sum fakeip-filter.json > fakeip-filter.json.sha256sum
 
       - name: Delete release if exist then create release
         env:

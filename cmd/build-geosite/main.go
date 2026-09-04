@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"archive/tar"
@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -130,6 +131,37 @@ func main() {
 	var cnClean []string
 	if err == nil {
 		tree := newDomainNode()
+		if tldCnRaw, err := os.ReadFile("resouces/tld-cn.txt"); err == nil {
+			for _, line := range strings.Split(string(tldCnRaw), "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "#") {
+					dom := strings.ToLower(line)
+					if tree.insert(dom) {
+						cnClean = append(cnClean, dom)
+					}
+				}
+			}
+		}
+		if directRaw, err := os.ReadFile("resouces/direct.txt"); err == nil {
+			for _, line := range strings.Split(string(directRaw), "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "#") {
+					dom := strings.ToLower(line)
+					if tree.insert(dom) {
+						cnClean = append(cnClean, dom)
+					}
+				}
+			}
+		}
+		foreignTLDMap := make(map[string]bool)
+		if tldNotCnRaw, err := os.ReadFile("resouces/tld-not-cn.txt"); err == nil {
+			for _, line := range strings.Split(string(tldNotCnRaw), "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "#") {
+					foreignTLDMap[strings.ToLower(line)] = true
+				}
+			}
+		}
 		scanner := bufio.NewScanner(strings.NewReader(string(cnRaw)))
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -137,6 +169,11 @@ func main() {
 				parts := strings.Split(line, "/")
 				if len(parts) >= 2 {
 					dom := parts[1]
+					dParts := strings.Split(dom, ".")
+					tld := dParts[len(dParts)-1]
+					if foreignTLDMap[tld] || tld == "beer" {
+						continue
+					}
 					if tree.insert(dom) {
 						cnClean = append(cnClean, dom)
 					}
@@ -218,22 +255,110 @@ func main() {
 		}
 	}
 	var customProxies []string
+	cnTLDMap := make(map[string]bool)
+	if tldCnRaw, err := os.ReadFile("resouces/tld-cn.txt"); err == nil {
+		for _, line := range strings.Split(string(tldCnRaw), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				cnTLDMap[strings.ToLower(line)] = true
+			}
+		}
+	}
+	cnTLDMap["cn"] = true
+
+	prxTree := newDomainNode()
+	if tldNotCnRaw, err := os.ReadFile("resouces/tld-not-cn.txt"); err == nil {
+		for _, line := range strings.Split(string(tldNotCnRaw), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				dom := strings.ToLower(line)
+				if prxTree.insert(dom) {
+					customProxies = append(customProxies, dom)
+				}
+			}
+		}
+	}
+
+	prxPath := filepath.Join(dataDir, "geolocation-!cn")
+	var existingProxy []string
+	if existRaw, err := os.ReadFile(prxPath); err == nil {
+		for _, line := range strings.Split(string(existRaw), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.Split(line, ".")
+			tld := parts[len(parts)-1]
+			if cnTLDMap[tld] {
+				continue
+			}
+			if prxTree.insert(line) {
+				existingProxy = append(existingProxy, line)
+			}
+		}
+	}
+
 	if prxRaw, err := os.ReadFile("resouces/proxy.txt"); err == nil {
-		tree := newDomainNode()
 		for _, line := range strings.Split(string(prxRaw), "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && !strings.HasPrefix(line, "#") && !proxyWL[strings.ToLower(line)] {
-				if tree.insert(line) {
+				parts := strings.Split(line, ".")
+				tld := parts[len(parts)-1]
+				if cnTLDMap[tld] {
+					continue
+				}
+				if prxTree.insert(line) {
 					customProxies = append(customProxies, line)
 				}
 			}
 		}
-		if len(customProxies) > 0 {
-			prxPath := filepath.Join(dataDir, "geolocation-!cn")
-			f, _ := os.OpenFile(prxPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			_, _ = f.WriteString("\n" + strings.Join(customProxies, "\n") + "\n")
-			f.Close()
-			fmt.Printf("✅ Injected %d custom proxy rules into geolocation-!cn\n", len(customProxies))
+	}
+	allProxies := append(customProxies, existingProxy...)
+	_ = os.WriteFile(prxPath, []byte(strings.Join(allProxies, "\n")+"\n"), 0644)
+	fmt.Printf("✅ Injected & deduplicated geolocation-!cn: %d rules\n", len(allProxies))
+
+	var customFakeIP []string
+	if fakeRaw, err := os.ReadFile("resouces/fakeip-filter.txt"); err == nil {
+		seen := make(map[string]bool)
+		for _, line := range strings.Split(string(fakeRaw), "\n") {
+			line = strings.SplitN(line, "#", 2)[0]
+			line = strings.TrimSpace(line)
+			if line == "" || line == "*" || strings.Contains(line, " ") {
+				continue
+			}
+			var entry string
+			if strings.HasPrefix(line, "*.") {
+				domain := line[2:]
+				if strings.Contains(domain, "*") {
+					entry = "regexp:" + "^" + regexp.QuoteMeta(line) + "$"
+					entry = strings.ReplaceAll(entry, `\*`, ".*")
+				} else {
+					entry = domain
+				}
+			} else if strings.HasPrefix(line, "+.") {
+				domain := line[2:]
+				if strings.Contains(domain, "*") {
+					pat := "^(.*\\.)?" + regexp.QuoteMeta(domain) + "$"
+					pat = strings.ReplaceAll(pat, `\*`, ".*")
+					entry = "regexp:" + pat
+				} else {
+					entry = domain
+				}
+			} else if strings.Contains(line, "*") {
+				entry = "regexp:" + "^" + regexp.QuoteMeta(line) + "$"
+				entry = strings.ReplaceAll(entry, `\*`, ".*")
+			} else {
+				entry = "full:" + line
+			}
+			if !seen[entry] {
+				seen[entry] = true
+				customFakeIP = append(customFakeIP, entry)
+			}
+		}
+		if len(customFakeIP) > 0 {
+			fakePath := filepath.Join(dataDir, "fakeip-filter")
+			_ = os.WriteFile(fakePath, []byte(strings.Join(customFakeIP, "\n")+"\n"), 0644)
+			fmt.Printf("✅ Injected %d rules into fakeip-filter\n", len(customFakeIP))
 		}
 	}
 
@@ -452,6 +577,29 @@ func main() {
 		siteListLite = append(siteListLite, &v2raygeo.GeoSite{
 			CountryCode: "CATEGORY-ADS",
 			Domain:      adsDomainsLite,
+		})
+	}
+
+	if len(customFakeIP) > 0 {
+		var fakeDomainsLite []*v2raygeo.Domain
+		for _, d := range customFakeIP {
+			dType := v2raygeo.Domain_Domain
+			val := d
+			if strings.HasPrefix(d, "full:") {
+				dType = v2raygeo.Domain_Full
+				val = strings.TrimPrefix(d, "full:")
+			} else if strings.HasPrefix(d, "regexp:") {
+				dType = v2raygeo.Domain_Regex
+				val = strings.TrimPrefix(d, "regexp:")
+			}
+			fakeDomainsLite = append(fakeDomainsLite, &v2raygeo.Domain{
+				Type:  dType,
+				Value: val,
+			})
+		}
+		siteListLite = append(siteListLite, &v2raygeo.GeoSite{
+			CountryCode: "FAKEIP-FILTER",
+			Domain:      fakeDomainsLite,
 		})
 	}
 
