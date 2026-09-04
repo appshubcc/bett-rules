@@ -31,3 +31,5 @@ telegra.ph
 tongji.baidu.com
 tv.sohu.com
 ue.yeyoucdn.com
+chat1.jd.com
+hybrid.miniapp.taobao.com
