@@ -125,12 +125,11 @@ jobs:
           python ./resouces/dedupTLD.py --mode cn --input temp-cn-sorted.txt --output ./community/data/cn --tld-cn ./resouces/tld-cn.txt --tld-not-cn ./resouces/tld-not-cn.txt
 
           cat temp-geolocation-\!cn.txt | sort --ignore-case -u | perl -ne '/^((?=^.{1,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})*)/ && print "$1\n"' > temp-proxy-sorted.txt
-          python ./resouces/dedupTLD.py --mode proxy --input temp-proxy-sorted.txt --output ./community/data/geolocation-\!cn --tld-not-cn ./resouces/tld-not-cn.txt --tld-cn ./resouces/tld-cn.txt
+          python ./resouces/dedupTLD.py --mode proxy --input temp-proxy-sorted.txt --output ./community/data/geolocation-\!cn --tld-not-cn ./resouces/tld-not-cn.txt --tld-cn ./resouces/tld-cn.txt --reserve proxy-reserve.txt
 
       - name: Add `full`, `regexp` and `keyword` type of rules back into "cn", and "geolocation-!cn" list
         run: |
           [ -f "direct-reserve.txt" ] && cat direct-reserve.txt >> ./community/data/cn
-          [ -f "proxy-reserve.txt" ] && cat proxy-reserve.txt >> ./community/data/geolocation-\!cn
           cp ./community/data/cn direct-list.txt
           cp ./community/data/geolocation-\!cn proxy-list.txt
 
