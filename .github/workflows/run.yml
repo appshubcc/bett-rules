@@ -116,8 +116,22 @@ jobs:
         run: |
           python ./resouces/removeFrom.py -remove ./resouces/direct-need-to-remove.txt -from ./direct-list-without-redundant -out ./temp-cn.txt
           python ./resouces/removeFrom.py -remove ./resouces/proxy-need-to-remove.txt -from ./proxy-list-without-redundant -out ./temp-geolocation-\!cn.txt
+          python ./resouces/removeFrom.py -remove ./resouces/proxy-need-to-remove.txt -from ./proxy-reserve.txt -out ./proxy-reserve.tmp && mv ./proxy-reserve.tmp ./proxy-reserve.txt
           python ./resouces/removeFrom.py -remove ./resouces/reject-need-to-remove.txt -from ./reject-list-without-redundant -out ./temp-reject.txt
           cat ./temp-reject.txt >> ./community/data/category-ads
+
+          # Inject verified domestic assets into geolocation-cn
+          [ -f "./resouces/geolocation-cn.txt" ] && cat ./resouces/geolocation-cn.txt >> ./community/data/geolocation-cn
+
+          # Remove shadowing parent domains from community/data categories
+          sed -i '/^myhuaweicloud\.com$/d' ./community/data/huaweicloud
+          sed -i '/^cdn20\.com$/d' ./community/data/wangsu
+          sed -i '/^alibabacloud\.com/d' ./community/data/alibabacloud
+          sed -i '/^oss-cn-hongkong\.aliyuncs\.com/d' ./community/data/aliyun
+          if [ -f "./resouces/cn-need-to-remove.txt" ]; then
+            python ./resouces/removeFrom.py -remove ./resouces/cn-need-to-remove.txt -from ./community/data/geolocation-cn -out ./community/data/geolocation-cn.tmp
+            mv ./community/data/geolocation-cn.tmp ./community/data/geolocation-cn
+          fi
 
       - name: Deduplicate and optimize `cn` and `geolocation-!cn` lists with TLD rules
         run: |
@@ -125,11 +139,12 @@ jobs:
           python ./resouces/dedupTLD.py --mode cn --input temp-cn-sorted.txt --output ./community/data/cn --tld-cn ./resouces/tld-cn.txt --tld-not-cn ./resouces/tld-not-cn.txt
 
           cat temp-geolocation-\!cn.txt | sort --ignore-case -u | perl -ne '/^((?=^.{1,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})*)/ && print "$1\n"' > temp-proxy-sorted.txt
-          python ./resouces/dedupTLD.py --mode proxy --input temp-proxy-sorted.txt --output ./community/data/geolocation-\!cn --tld-not-cn ./resouces/tld-not-cn.txt --tld-cn ./resouces/tld-cn.txt --reserve proxy-reserve.txt
+          python ./resouces/dedupTLD.py --mode proxy --input temp-proxy-sorted.txt --output ./community/data/geolocation-\!cn --tld-not-cn ./resouces/tld-not-cn.txt --tld-cn ./resouces/tld-cn.txt --reserve proxy-reserve.txt --remove ./resouces/proxy-need-to-remove.txt
 
       - name: Add `full`, `regexp` and `keyword` type of rules back into "cn", and "geolocation-!cn" list
         run: |
           [ -f "direct-reserve.txt" ] && cat direct-reserve.txt >> ./community/data/cn
+          [ -f "./resouces/geolocation-cn.txt" ] && cat ./resouces/geolocation-cn.txt >> ./community/data/cn
           cp ./community/data/cn direct-list.txt
           cp ./community/data/geolocation-\!cn proxy-list.txt
 

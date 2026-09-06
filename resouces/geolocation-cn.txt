@@ -1,0 +1,58 @@
+# Verified China Mainland Physical Endpoints & Direct Assets
+
+# Samsung China (AWS Beijing & Beijing Unicom)
+cn-ureca.galaxyappstore.com
+cn-ms.galaxyappstore.com
+cn.samsungapps.com
+
+# Microsoft China (Microsoft Beijing & Domestic CDN)
+cn.bing.com
+download.windowsupdate.com
+
+# Sony PlayStation China CDN (China Mobile)
+gs2.ww.prod.dl.playstation.net
+
+# Apple China Mainland Services (China Mobile & Aliyun CDN)
+weather-data.apple.com
+captive.apple.com
+
+# Tencent Cloud IM Domestic Heartbeat (China Telecom Jiangsu)
+shortconn.im.qcloud.com
+
+# OnePlus (China Telecom Beijing IDC)
+oneplus.com
+community.oneplus.com
+
+# Domestic Enterprise Root Domains
+cdnetworks.com
+dji.com
+djicdn.com
+dji.net
+djiops.com
+djiservice.org
+hao123.com
+hao123img.com
+lenovo.com
+razerzone.com
+skypixel.com
+tripcdn.com
+
+# Domestic NTP Servers
+ntp.aliyun.com
+ntp1.aliyun.com
+ntp2.aliyun.com
+ntp3.aliyun.com
+ntp4.aliyun.com
+ntp5.aliyun.com
+ntp6.aliyun.com
+ntp7.aliyun.com
+ntp.tencent.com
+ntp1.tencent.com
+ntp2.tencent.com
+ntp3.tencent.com
+ntp4.tencent.com
+ntp5.tencent.com
+cn.pool.ntp.org
+ntp.neu.edu.cn
+ntp.ntsc.ac.cn
+ntp.org.cn

@@ -17,6 +17,24 @@ def load_tlds(filepath):
                 tlds.add(tld)
     return tlds
 
+def load_domain_set(filepath):
+    doms = set()
+    if not filepath or not os.path.exists(filepath):
+        return doms
+    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            clean = line.split("#")[0].strip()
+            if not clean:
+                continue
+            for p in ["full:", "domain:", "regexp:", "keyword:"]:
+                if clean.startswith(p):
+                    clean = clean[len(p):]
+                    break
+            dom = clean.split(" @")[0].strip().lower()
+            if dom:
+                doms.add(dom)
+    return doms
+
 def parse_rule(line):
     line = line.split("#")[0].strip()
     if not line:
@@ -36,10 +54,11 @@ def parse_rule(line):
         attr = " @" + parts[1].strip()
     return prefix, domain.lower(), attr
 
-def dedup_cn(input_path, tld_cn_path, output_path, tld_not_cn_path=None, direct_path=None):
+def dedup_cn(input_path, tld_cn_path, output_path, tld_not_cn_path=None, direct_path=None, remove_path=None):
     tld_cn = load_tlds(tld_cn_path)
     tld_not_cn = load_tlds(tld_not_cn_path) if tld_not_cn_path else set()
     direct_roots = load_tlds(direct_path) if direct_path else set()
+    remove_set = load_domain_set(remove_path) if remove_path else set()
 
     with open(input_path, "r", encoding="utf-8", errors="ignore") as f:
         lines = f.readlines()
@@ -55,15 +74,15 @@ def dedup_cn(input_path, tld_cn_path, output_path, tld_not_cn_path=None, direct_
         seen.add(tld)
         out_domains.append(tld)
 
-    # Ensure all direct root domains are injected
+    # Ensure all direct root domains are injected (if not in remove_set)
     for root in sorted(direct_roots):
-        if root not in seen:
+        if root not in seen and root not in remove_set:
             seen.add(root)
             out_domains.append(root)
 
     for raw_line in lines:
         prefix, domain, attr = parse_rule(raw_line)
-        if not domain:
+        if not domain or domain in remove_set:
             continue
 
         if prefix in ["regexp:", "keyword:"]:
@@ -120,10 +139,11 @@ class TrieNode:
         self.is_leaf = False  # domain suffix match (covers all subdomains)
         self.is_exact = False # exact match only (full:)
 
-def dedup_proxy(input_path, tld_not_cn_path, tld_cn_path, output_path, reserve_path=None):
+def dedup_proxy(input_path, tld_not_cn_path, tld_cn_path, output_path, reserve_path=None, remove_path=None):
     tld_not_cn = load_tlds(tld_not_cn_path)
     tld_cn = load_tlds(tld_cn_path)
     tld_cn.add("cn")
+    remove_set = load_domain_set(remove_path) if remove_path else set()
 
     root = TrieNode()
     # Inject all foreign TLD roots into the Trie as leaves
@@ -145,10 +165,15 @@ def dedup_proxy(input_path, tld_not_cn_path, tld_cn_path, output_path, reserve_p
     special_rules = []
     seen = set()
     cn_excluded_count = 0
+    removed_count = 0
 
     for raw_line in lines:
         prefix, domain, attr = parse_rule(raw_line)
         if not domain:
+            continue
+
+        if domain in remove_set:
+            removed_count += 1
             continue
 
         if prefix in ["regexp:", "keyword:"]:
@@ -223,7 +248,7 @@ def dedup_proxy(input_path, tld_not_cn_path, tld_cn_path, output_path, reserve_p
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(out_domains) + "\n")
 
-    print(f"[Proxy Deduplication] Input: {len(lines)} lines -> Output: {len(out_domains)} lines (Pruned {pruned_subdomains_count} redundant subdomains via Trie, Excluded {cn_excluded_count} CN domains, Injected {len(tld_not_cn)} TLD roots)")
+    print(f"[Proxy Deduplication] Input: {len(lines)} lines -> Output: {len(out_domains)} lines (Pruned {pruned_subdomains_count} redundant subdomains via Trie, Excluded {cn_excluded_count} CN domains, Filtered {removed_count} excluded domains, Injected {len(tld_not_cn)} TLD roots)")
 
 def main():
     parser = argparse.ArgumentParser(description="TLD-based domain list deduplication tool")
@@ -234,13 +259,14 @@ def main():
     parser.add_argument("--tld-not-cn", default="resouces/tld-not-cn.txt", help="Path to tld-not-cn file")
     parser.add_argument("--direct", default="resouces/direct.txt", help="Path to direct root domains file")
     parser.add_argument("--reserve", default=None, help="Path to reserved rules file (full, regexp, keyword)")
+    parser.add_argument("--remove", default=None, help="Path to domain removal list")
 
     args = parser.parse_args()
 
     if args.mode == "cn":
-        dedup_cn(args.input, args.tld_cn, args.output, args.tld_not_cn, args.direct)
+        dedup_cn(args.input, args.tld_cn, args.output, args.tld_not_cn, args.direct, args.remove)
     elif args.mode == "proxy":
-        dedup_proxy(args.input, args.tld_not_cn, args.tld_cn, args.output, args.reserve)
+        dedup_proxy(args.input, args.tld_not_cn, args.tld_cn, args.output, args.reserve, args.remove)
 
 if __name__ == "__main__":
     main()
