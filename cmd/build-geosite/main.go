@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -248,7 +249,10 @@ func main() {
 	proxyWL := make(map[string]bool)
 	if wlRaw, err := os.ReadFile("resouces/proxy-need-to-remove.txt"); err == nil {
 		for _, line := range strings.Split(string(wlRaw), "\n") {
+			line = strings.SplitN(line, "#", 2)[0]
 			line = strings.TrimSpace(line)
+			line = strings.TrimPrefix(line, "full:")
+			line = strings.TrimPrefix(line, "domain:")
 			if line != "" {
 				proxyWL[strings.ToLower(line)] = true
 			}
@@ -292,6 +296,12 @@ func main() {
 			if cnTLDMap[tld] {
 				continue
 			}
+			dom := strings.TrimPrefix(line, "full:")
+			dom = strings.TrimPrefix(dom, "domain:")
+			dom = strings.TrimSpace(strings.Split(dom, "@")[0])
+			if proxyWL[strings.ToLower(dom)] {
+				continue
+			}
 			if prxTree.insert(line) {
 				existingProxy = append(existingProxy, line)
 			}
@@ -316,6 +326,58 @@ func main() {
 	allProxies := append(customProxies, existingProxy...)
 	_ = os.WriteFile(prxPath, []byte(strings.Join(allProxies, "\n")+"\n"), 0644)
 	fmt.Printf("✅ Injected & deduplicated geolocation-!cn: %d rules\n", len(allProxies))
+
+	cnRemoveSet := make(map[string]bool)
+	if cnNeedRemoveRaw, err := os.ReadFile("resouces/cn-need-to-remove.txt"); err == nil {
+		for _, l := range strings.Split(string(cnNeedRemoveRaw), "\n") {
+			l = strings.SplitN(l, "#", 2)[0]
+			l = strings.TrimSpace(l)
+			l = strings.TrimPrefix(l, "full:")
+			l = strings.TrimPrefix(l, "domain:")
+			if l != "" {
+				cnRemoveSet[strings.ToLower(l)] = true
+			}
+		}
+	}
+
+	geoCnPath := filepath.Join(dataDir, "geolocation-cn")
+	cnPath := filepath.Join(dataDir, "cn")
+	if geoCnRaw, err := os.ReadFile("resouces/geolocation-cn.txt"); err == nil {
+		f, _ := os.OpenFile(geoCnPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		_, _ = f.WriteString("\n" + string(geoCnRaw) + "\n")
+		f.Close()
+
+		f2, _ := os.OpenFile(cnPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		_, _ = f2.WriteString("\n" + string(geoCnRaw) + "\n")
+		f2.Close()
+		fmt.Printf("✅ Injected verified domestic endpoints into geolocation-cn & cn\n")
+	}
+
+	if len(cnRemoveSet) > 0 {
+		cleanFile := func(p string) {
+			if b, err := os.ReadFile(p); err == nil {
+				var kept []string
+				for _, line := range strings.Split(string(b), "\n") {
+					trimmed := strings.TrimSpace(line)
+					parts := strings.Fields(trimmed)
+					if len(parts) > 0 {
+						dom := strings.TrimPrefix(parts[0], "domain:")
+						if cnRemoveSet[strings.ToLower(dom)] {
+							continue
+						}
+					}
+					kept = append(kept, line)
+				}
+				_ = os.WriteFile(p, []byte(strings.Join(kept, "\n")), 0644)
+			}
+		}
+		cleanFile(geoCnPath)
+		cleanFile(filepath.Join(dataDir, "huaweicloud"))
+		cleanFile(filepath.Join(dataDir, "wangsu"))
+		cleanFile(filepath.Join(dataDir, "alibabacloud"))
+		cleanFile(filepath.Join(dataDir, "aliyun"))
+		fmt.Printf("✅ Cleaned %d shadowing parent domains from community CN categories\n", len(cnRemoveSet))
+	}
 
 	var customFakeIP []string
 	if fakeRaw, err := os.ReadFile("resouces/fakeip-filter.txt"); err == nil {
@@ -446,7 +508,11 @@ func main() {
 
 	for tag := range rawMap {
 		allLines := resolveTag(tag)
-		var domains []*v2raygeo.Domain
+		type rawItem struct {
+			dType v2raygeo.Domain_Type
+			val   string
+		}
+		var rawItems []rawItem
 		seen := make(map[string]bool)
 
 		for _, line := range allLines {
@@ -474,12 +540,49 @@ func main() {
 				val = strings.TrimSpace(val[:idx])
 			}
 
+			lowerVal := strings.ToLower(val)
+			lowerTag := strings.ToLower(tag)
+
+			// Punch-through: If tag is geolocation-!cn or proxy, exclude anything in proxyWL
+			if (lowerTag == "geolocation-!cn" || lowerTag == "proxy") && proxyWL[lowerVal] {
+				continue
+			}
+			// Shadowing parent exclusion: ONLY for geolocation-cn (routing rule), NOT for cn (dns rule)
+			if lowerTag == "geolocation-cn" && cnRemoveSet[lowerVal] {
+				continue
+			}
+
 			key := fmt.Sprintf("%d:%s", dType, val)
 			if val != "" && !seen[key] {
 				seen[key] = true
+				rawItems = append(rawItems, rawItem{dType, val})
+			}
+		}
+
+		// Sort: shorter domain label count first so root domain inserts before child subdomain
+		sort.Slice(rawItems, func(i, j int) bool {
+			lenI := len(strings.Split(rawItems[i].val, "."))
+			lenJ := len(strings.Split(rawItems[j].val, "."))
+			if lenI != lenJ {
+				return lenI < lenJ
+			}
+			return rawItems[i].dType < rawItems[j].dType
+		})
+
+		tree := newDomainNode()
+		var domains []*v2raygeo.Domain
+		for _, it := range rawItems {
+			if it.dType == v2raygeo.Domain_Domain {
+				if tree.insert(it.val) {
+					domains = append(domains, &v2raygeo.Domain{
+						Type:  it.dType,
+						Value: it.val,
+					})
+				}
+			} else {
 				domains = append(domains, &v2raygeo.Domain{
-					Type:  dType,
-					Value: val,
+					Type:  it.dType,
+					Value: it.val,
 				})
 			}
 		}

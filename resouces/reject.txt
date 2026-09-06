@@ -470,6 +470,9 @@ livep.l.aiseet.atianqi.com
 lives.l.aiseet.atianqi.com
 livewebbs2pcdn.msstatic.com
 lm10111.jtrincc.cn
+locationhistory-pa.googleapis.com
+locationhistoryaggregates-pa.googleapis.com
+locationhistoryplacedetails-pa.googleapis.com
 log-api-mn.huxiu.com
 log-api.huxiu.com
 log-api.pangolin-sdk-toutiao.com
@@ -610,6 +613,7 @@ ppoi.org
 privacy-mgmt.com
 promotion-partner.kuaishou.com
 proxy.advp.apple.com
+push-ads-cn.heytapmobi.com
 public.gdtimg.com
 q.i.gdt.qq.com
 qn-cdnfile1pcdn.msstatic.com

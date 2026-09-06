@@ -1,0 +1,5 @@
+# Parent domains in CN that shadow overseas child nodes in !CN
+myhuaweicloud.com
+alibabacloud.com
+cdn20.com
+oss-cn-hongkong.aliyuncs.com
