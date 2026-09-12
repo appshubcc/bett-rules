@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "ip_cidr": "240a:abd9::/32"
+    }
+  ]
+}
