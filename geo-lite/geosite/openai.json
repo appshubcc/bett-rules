@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": "o33249.ingest.sentry.io",
+      "domain_suffix": "openai.com"
+    }
+  ]
+}
