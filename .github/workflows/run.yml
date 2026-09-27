@@ -18,6 +18,7 @@ jobs:
         run: |
           echo "GOAMD64=v3" >> $GITHUB_ENV
           echo "BUILDTIME=$(TZ=Asia/Shanghai date +'%Y-%m-%d %H:%M')" >> $GITHUB_ENV
+          echo "CACHE_DATE=$(TZ=Asia/Shanghai date +'%Y%m%d')" >> $GITHUB_ENV
           echo "CHINA_DOMAINS_URL=https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf" >> $GITHUB_ENV
           echo "GOOGLE_DOMAINS_URL=https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/google.china.conf" >> $GITHUB_ENV
           echo "APPLE_DOMAINS_URL=https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/apple.china.conf" >> $GITHUB_ENV          # echo "CUSTOM_DIRECT=https://raw.githubusercontent.com/Loyalsoldier/domain-list-custom/release/cn.txt" >> $GITHUB_ENV
@@ -223,24 +224,71 @@ jobs:
           python ../resouces/formatFakeIP.py ../resouces/fakeip-filter.txt ./data-lite/fakeip-filter
           go run ./ --datapath=./data-lite --outputname geosite-lite.dat
 
-      - name: Download IPinfo Lite CSV database
+      - name: Cache IP2Location databases
+        uses: actions/cache@v4
+        id: ip2location-cache
+        with:
+          path: |
+            ./china46.txt
+            ./IP2LOCATION-LITE-DB1.CIDR.CSV
+            ./IP2LOCATION-LITE-DB1.IPV6.CIDR.CSV
+            ./IP2LOCATION-LITE-ASN.CSV
+            ./IP2LOCATION-LITE-ASN.IPV6.CSV
+            ./mihomo
+          key: ip2location-${{ runner.os }}-${{ env.CACHE_DATE }}
+          restore-keys: |
+            ip2location-${{ runner.os }}-
+
+      - name: Download IP databases (china-operator-ip, IP2Location DB1 & ASN)
         env:
-          IPINFO_TOKEN: ${{ secrets.IPINFO_TOKEN }}
+          IP2LOC_TOKEN: ${{ secrets.IP2LOCATION_TOKEN }}
         run: |
-          curl -sSL "https://ipinfo.io/data/ipinfo_lite.csv.gz?_src=frontend&token=${IPINFO_TOKEN}" -o ipinfo_lite.csv.gz
+          curl -sSL --retry 3 --retry-delay 2 "https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/china46.txt" -o china46.txt.tmp && mv china46.txt.tmp china46.txt || true
+          if [ ! -s china46.txt ] && [ ! -f china46.txt ]; then
+            echo "Failed to fetch china46.txt" && exit 1
+          fi
+
+          fetch_db() {
+            local code="$1"
+            local zip="$2"
+            local target="$3"
+            local ok=0
+            for i in 1 2 3; do
+              curl -sSL -m 120 "https://www.ip2location.com/download?token=${IP2LOC_TOKEN}&file=${code}" -o "${zip}"
+              if unzip -t -q "${zip}" >/dev/null 2>&1; then
+                unzip -o -q "${zip}"
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            if [ $ok -ne 1 ]; then
+              if [ -s "${target}" ]; then
+                echo "::warning::Failed to download ${code}, using cached ${target}"
+              else
+                echo "::error::Failed to download ${code} and no cache found!"
+                cat "${zip}" 2>/dev/null || true
+                exit 1
+              fi
+            fi
+          }
+
+          fetch_db "DB1LITECIDR" "db1_v4.zip" "IP2LOCATION-LITE-DB1.CIDR.CSV"
+          fetch_db "DB1LITECIDRIPV6" "db1_v6.zip" "IP2LOCATION-LITE-DB1.IPV6.CIDR.CSV"
+          fetch_db "DBASNLITECSV" "asn_v4.zip" "IP2LOCATION-LITE-ASN.CSV"
+          fetch_db "DBASNLITECSVIPV6" "asn_v6.zip" "IP2LOCATION-LITE-ASN.IPV6.CSV"
+          ls -lh IP2LOCATION-LITE-*.CSV
 
       - name: Build GeoIP databases (Full & Lite)
         run: |
           mkdir -p ./publish/
-          go run ./cmd/build-geoip -input ./ipinfo_lite.csv.gz -out ./publish
-
-      - name: Build geosite db files
-        env:
-          NO_SKIP: true
-        run: |
-          go install -trimpath -ldflags="-s -w -buildid=" github.com/metacubex/geo/cmd/geo@master
-          geo convert site -i v2ray -o sing -f ./publish/geosite.db ./custom/publish/geosite.dat
-          geo convert site -i v2ray -o sing -f ./publish/geosite-lite.db ./community/geosite-lite.dat
+          go run ./cmd/build-geoip \
+            -db1-v4 ./IP2LOCATION-LITE-DB1.CIDR.CSV \
+            -db1-v6 ./IP2LOCATION-LITE-DB1.IPV6.CIDR.CSV \
+            -asn-v4 ./IP2LOCATION-LITE-ASN.CSV \
+            -asn-v6 ./IP2LOCATION-LITE-ASN.IPV6.CSV \
+            -china-ip ./china46.txt \
+            -out ./publish
 
       - name: Convert geo to sing-rule-set
         env:
@@ -280,9 +328,11 @@ jobs:
 
       - name: Generate fakeip-filter ruleset for meta and release
         run: |
-          mihomo_version=$(curl -sSL https://api.github.com/repos/MetaCubeX/mihomo/releases | grep 'tag_name' | grep -v 'Alpha' | head -n 1 | sed -e 's/.*v/v/' -e 's/".*//')
-          curl -sSL "https://github.com/MetaCubeX/mihomo/releases/download/${mihomo_version}/mihomo-linux-amd64-${mihomo_version}.gz" | gzip -d > ./mihomo
-          chmod +x ./mihomo
+          if [ ! -f "./mihomo" ]; then
+            curl -sSL --retry 3 --retry-delay 2 "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-v1.19.32.gz" -o mihomo.gz
+            gzip -d -f mihomo.gz
+            chmod +x ./mihomo
+          fi
           python ./resouces/formatFakeIP.py --gen-ruleset ./resouces/fakeip-filter.txt ./meta-rule/geo/geosite
           ./mihomo convert-ruleset domain text ./meta-rule/geo/geosite/fakeip-filter.list ./meta-rule/geo/geosite/fakeip-filter.mrs
           cp ./meta-rule/geo/geosite/fakeip-filter.* ./meta-rule/geo-lite/geosite/
@@ -332,10 +382,6 @@ jobs:
           sha256sum geoip.dat > geoip.dat.sha256sum
           sha256sum geosite.dat > geosite.dat.sha256sum
           sha256sum geosite-lite.dat > geosite-lite.dat.sha256sum
-          sha256sum geosite.db > geosite.db.sha256sum
-          sha256sum geosite-lite.db > geosite-lite.db.sha256sum
-          sha256sum geoip.db > geoip.db.sha256sum
-          sha256sum geoip-lite.db > geoip-lite.db.sha256sum
           sha256sum geoip.metadb > geoip.metadb.sha256sum
           sha256sum geoip-lite.metadb > geoip-lite.metadb.sha256sum
           sha256sum BundleMRS.7z > BundleMRS.7z.sha256sum

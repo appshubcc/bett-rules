@@ -1,0 +1,30 @@
+# Binaries and executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+build-geoip
+build-geosite
+
+# Build outputs
+publish/
+dist/
+bin/
+
+# Temporary and downloaded data files
+*.zip
+*.tar
+*.tar.gz
+*.tmp
+*.bak
+temp-*
+*-list-*
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"compress/gzip"
 	"encoding/csv"
 	"encoding/json"
 	"flag"
@@ -60,6 +59,8 @@ var fallbackCloudflareCIDRs = []string{
 	"104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
 	"2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
 	"2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+	"1.1.1.0/24", "1.0.0.0/24", "162.159.36.0/24", "162.159.46.0/24",
+	"2606:4700:4700::/48", "2606:4700:4701::/48",
 }
 
 var supplementAppleCIDRs = []string{
@@ -74,17 +75,35 @@ var supplementTelegramCIDRs = []string{
 	"2a0a:f280::/32",
 }
 
+var supplementSpotifyCIDRs = []string{
+	"35.186.224.0/24",
+	"104.154.127.0/24",
+	"104.199.241.0/24",
+	"35.190.69.0/24",
+	"35.190.89.0/24",
+	"2a01:280:103::/48",
+	"2a01:280:206::/48",
+}
+
+var preciseASNCountry = map[uint32]string{
+	59930:  "US",
+	62014:  "SG",
+	62041:  "NL",
+	44907:  "NL",
+	211157: "NL",
+}
+
 var preciseASNs = map[string]map[string]bool{
 	"telegram":  {"AS44907": true, "AS62041": true, "AS62014": true, "AS59930": true, "AS211157": true},
-	"openai":    {"AS398324": true, "AS401518": true},
-	"twitter":   {"AS13414": true, "AS35995": true, "AS63179": true, "AS18747": true, "AS62904": true, "AS152868": true, "AS26662": true, "AS49532": true},
-	"steam":     {"AS32590": true, "AS214256": true, "AS136784": true, "AS268379": true, "AS60086": true},
-	"spotify":   {"AS19679": true},
+	"openai":    {"AS401518": true},
+	"twitter":   {"AS13414": true, "AS35995": true, "AS63179": true},
+	"steam":     {"AS32590": true},
+	"spotify":   {"AS8403": true},
 	"netflix":   {"AS2906": true, "AS40027": true, "AS55095": true},
 	"facebook":  {"AS32934": true, "AS63293": true, "AS54115": true},
-	"apple":     {"AS714": true, "AS6185": true, "AS139901": true, "AS35026": true, "AS31128": true, "AS210176": true, "AS138575": true, "AS136716": true, "AS400506": true, "AS40058": true},
+	"apple":     {"AS714": true, "AS6185": true, "AS31128": true, "AS1036": true},
 	"tiktok":    {"AS138699": true, "AS396986": true, "AS11983": true},
-	"bilibili":  {"AS140222": true, "AS140633": true},
+	"bilibili":  {"AS140633": true},
 	"fastly":    {"AS54113": true},
 	"akamai":    {"AS20940": true, "AS36183": true, "AS32787": true, "AS16625": true, "AS63949": true, "AS35994": true, "AS24319": true, "AS34164": true, "AS12222": true},
 	"microsoft": {"AS8075": true, "AS8069": true, "AS3598": true, "AS8068": true, "AS8070": true, "AS35106": true, "AS12076": true},
@@ -102,17 +121,189 @@ var requireNonCN = map[string]bool{
 	"cloudfront": true,
 }
 
+func normalizePrefix(p netip.Prefix) (netip.Prefix, bool) {
+	addr := p.Addr()
+	if addr.Is4In6() {
+		return p, false
+	}
+	if addr.Is4() {
+		if p.Bits() > 24 {
+			if norm, err := addr.Prefix(24); err == nil {
+				return norm, true
+			}
+		}
+		return p, true
+	} else if addr.Is6() {
+		if p.Bits() > 44 {
+			if norm, err := addr.Prefix(44); err == nil {
+				return norm, true
+			}
+		}
+		return p, true
+	}
+	return p, true
+}
+
+func loadDB1(path string, countryFull, countryLite map[string][]netip.Prefix) error {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	reader := csv.NewReader(bufio.NewReaderSize(f, 4*1024*1024))
+	reader.ReuseRecord = true
+
+	count := 0
+	for {
+		rec, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil || len(rec) < 2 {
+			continue
+		}
+		cc := strings.ToUpper(strings.TrimSpace(rec[1]))
+		if cc == "" || cc == "-" {
+			continue
+		}
+		p, err := netip.ParsePrefix(strings.TrimSpace(rec[0]))
+		if err != nil {
+			continue
+		}
+		norm, ok := normalizePrefix(p)
+		if !ok {
+			continue
+		}
+		countryFull[cc] = append(countryFull[cc], norm)
+		if liteCountries[cc] {
+			countryLite[cc] = append(countryLite[cc], norm)
+		}
+		count++
+	}
+	fmt.Printf("✅ Loaded %d records from DB1: %s\n", count, path)
+	return nil
+}
+
+func loadASN(path string, asnMap, asnMapLite map[uint32][]netip.Prefix, asnNameMap map[uint32]string, serviceFull, serviceLite map[string][]netip.Prefix, chinaSet, cfSet, cfFrontSet *netipx.IPSet) error {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	reader := csv.NewReader(bufio.NewReaderSize(f, 4*1024*1024))
+	reader.ReuseRecord = true
+
+	count := 0
+	for {
+		rec, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil || len(rec) < 5 {
+			continue
+		}
+		asnStr := strings.TrimSpace(rec[3])
+		if asnStr == "" || asnStr == "-" {
+			continue
+		}
+		num, err := strconv.ParseUint(asnStr, 10, 32)
+		if err != nil || num == 0 {
+			continue
+		}
+		asnNum := uint32(num)
+		asName := strings.TrimSpace(rec[4])
+
+		p, err := netip.ParsePrefix(strings.TrimSpace(rec[2]))
+		if err != nil {
+			continue
+		}
+		norm, ok := normalizePrefix(p)
+		if !ok {
+			continue
+		}
+		p = norm
+
+		asnMap[asnNum] = append(asnMap[asnNum], p)
+		if _, ok := asnNameMap[asnNum]; !ok && asName != "" && asName != "-" {
+			asnNameMap[asnNum] = asName
+		}
+
+		formattedASN := "AS" + asnStr
+		isLiteASN := false
+
+		for tag, asns := range preciseASNs {
+			if asns[formattedASN] {
+				isLiteASN = true
+				if requireNonCN[tag] && chinaSet != nil && chinaSet.Contains(p.Addr()) {
+					continue
+				}
+				serviceFull[tag] = append(serviceFull[tag], p)
+				serviceLite[tag] = append(serviceLite[tag], p)
+			}
+		}
+
+		if !isLiteASN {
+			if cfSet != nil && cfSet.ContainsPrefix(p) {
+				isLiteASN = true
+			} else if cfFrontSet != nil && cfFrontSet.ContainsPrefix(p) {
+				isLiteASN = true
+			}
+		}
+
+		if isLiteASN {
+			asnMapLite[asnNum] = append(asnMapLite[asnNum], p)
+		}
+		count++
+	}
+	fmt.Printf("✅ Loaded %d records from ASN: %s\n", count, path)
+	return nil
+}
+
 func main() {
-	inputFile := flag.String("input", "ipinfo_lite.csv.gz", "Path to ipinfo_lite.csv.gz")
-	outputDir := flag.String("out", "./publish", "Output directory for compiled assets")
+	db1V4File := flag.String("db1-v4", "", "Path to IP2LOCATION-LITE-DB1.CIDR.CSV")
+	db1V6File := flag.String("db1-v6", "", "Path to IP2LOCATION-LITE-DB1.IPV6.CIDR.CSV")
+	asnV4File := flag.String("asn-v4", "", "Path to IP2LOCATION-LITE-ASN.CSV")
+	asnV6File := flag.String("asn-v6", "", "Path to IP2LOCATION-LITE-ASN.IPV6.CSV")
+	chinaIPFile := flag.String("china-ip", "", "Path to china46.txt")
+	outputDir := flag.String("out", "./publish", "Output directory")
 	flag.Parse()
 
 	startTime := time.Now()
-	fmt.Printf("🚀 Starting GeoIP build from: %s\n", *inputFile)
+	fmt.Println("🚀 Starting GeoIP build with IP2Location...")
 
 	if err := os.MkdirAll(*outputDir, 0o755); err != nil {
 		fmt.Printf("❌ Failed to create output directory: %v\n", err)
 		os.Exit(1)
+	}
+
+	var chinaSet *netipx.IPSet
+	var chinaPrefixes []netip.Prefix
+	if *chinaIPFile != "" {
+		if fChina, err := os.Open(*chinaIPFile); err == nil {
+			var builder netipx.IPSetBuilder
+			scanner := bufio.NewScanner(fChina)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
+				if p, err := netip.ParsePrefix(line); err == nil {
+					builder.AddPrefix(p)
+					chinaPrefixes = append(chinaPrefixes, p)
+				}
+			}
+			fChina.Close()
+			chinaSet, _ = builder.IPSet()
+			fmt.Printf("✅ Loaded %d authoritative CN prefixes from: %s\n", len(chinaPrefixes), *chinaIPFile)
+		}
 	}
 
 	cfPrefixes := fetchCloudflareIPs()
@@ -129,28 +320,6 @@ func main() {
 		cfFrontBuilder.AddPrefix(p)
 	}
 	cfFrontSet, _ := cfFrontBuilder.IPSet()
-
-	file, err := os.Open(*inputFile)
-	if err != nil {
-		fmt.Printf("❌ Failed to open input file: %v\n", err)
-		os.Exit(1)
-	}
-	defer file.Close()
-
-	gz, err := gzip.NewReader(bufio.NewReaderSize(file, 4*1024*1024))
-	if err != nil {
-		fmt.Printf("❌ Failed to init gzip reader: %v\n", err)
-		os.Exit(1)
-	}
-	defer gz.Close()
-
-	csvReader := csv.NewReader(gz)
-	csvReader.ReuseRecord = true
-
-	if _, err := csvReader.Read(); err != nil {
-		fmt.Printf("❌ Failed to read CSV header: %v\n", err)
-		os.Exit(1)
-	}
 
 	countryFull := make(map[string][]netip.Prefix, 256)
 	countryLite := make(map[string][]netip.Prefix, 2)
@@ -177,88 +346,71 @@ func main() {
 		serviceLite["cloudfront"] = cfFrontPrefixes
 	}
 
-	fmt.Println("⏳ Parsing CSV records...")
-	rowCount := 0
+	if err := loadDB1(*db1V4File, countryFull, countryLite); err != nil {
+		fmt.Printf("❌ Failed to load DB1 v4: %v\n", err)
+		os.Exit(1)
+	}
+	if err := loadDB1(*db1V6File, countryFull, countryLite); err != nil {
+		fmt.Printf("❌ Failed to load DB1 v6: %v\n", err)
+		os.Exit(1)
+	}
 
-	for {
-		rec, err := csvReader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil || len(rec) < 8 {
-			continue
-		}
+	if err := loadASN(*asnV4File, asnMap, asnMapLite, asnNameMap, serviceFull, serviceLite, chinaSet, cfSet, cfFrontSet); err != nil {
+		fmt.Printf("❌ Failed to load ASN v4: %v\n", err)
+		os.Exit(1)
+	}
+	if err := loadASN(*asnV6File, asnMap, asnMapLite, asnNameMap, serviceFull, serviceLite, chinaSet, cfSet, cfFrontSet); err != nil {
+		fmt.Printf("❌ Failed to load ASN v6: %v\n", err)
+		os.Exit(1)
+	}
 
-		rowCount++
-		networkStr := rec[0]
-		cc := strings.ToUpper(strings.TrimSpace(rec[2]))
-		asnStr := strings.ToUpper(strings.TrimSpace(rec[5]))
-		asName := rec[6]
+	if len(countryFull) <= 1 {
+		fmt.Printf("❌ Fatal: countryFull only contains %d countries, DB1 data is missing\n", len(countryFull))
+		os.Exit(1)
+	}
 
-		prefix, err := netip.ParsePrefix(networkStr)
-		if err != nil {
-			continue
-		}
-
-		addr := prefix.Addr()
-		if addr.Is4() && prefix.Bits() > 24 {
-			if norm, err := addr.Prefix(24); err == nil {
-				prefix = norm
+	if chinaSet != nil {
+		fmt.Println("🇨🇳 Injecting china46.txt prefixes into CN and purging from overseas...")
+		for cc := range countryFull {
+			if cc == "CN" {
+				continue
 			}
-		} else if addr.Is6() && prefix.Bits() > 44 {
-			if norm, err := addr.Prefix(44); err == nil {
-				prefix = norm
+			var builder netipx.IPSetBuilder
+			for _, p := range countryFull[cc] {
+				builder.AddPrefix(p)
 			}
+			s, _ := builder.IPSet()
+			var diff netipx.IPSetBuilder
+			for _, p := range s.Prefixes() {
+				if !chinaSet.Contains(p.Addr()) {
+					diff.AddPrefix(p)
+				}
+			}
+			cleanSet, _ := diff.IPSet()
+			countryFull[cc] = cleanSet.Prefixes()
 		}
 
-		if cc != "" {
-			countryFull[cc] = append(countryFull[cc], prefix)
-			if liteCountries[cc] {
-				countryLite[cc] = append(countryLite[cc], prefix)
-			}
-		}
-
-		for tag, asns := range preciseASNs {
-			if asns[asnStr] {
-				if requireNonCN[tag] && cc == "CN" {
-					continue
-				}
-				serviceFull[tag] = append(serviceFull[tag], prefix)
-				serviceLite[tag] = append(serviceLite[tag], prefix)
-			}
-		}
-
-		if strings.HasPrefix(asnStr, "AS") {
-			if num, err := strconv.ParseUint(asnStr[2:], 10, 32); err == nil && num > 0 {
-				asnNum := uint32(num)
-				asnMap[asnNum] = append(asnMap[asnNum], prefix)
-				if _, ok := asnNameMap[asnNum]; !ok && asName != "" {
-					asnNameMap[asnNum] = asName
-				}
-
-				isLiteASN := false
-				for _, asns := range preciseASNs {
-					if asns[asnStr] {
-						isLiteASN = true
-						break
-					}
-				}
-				if !isLiteASN {
-					if cfSet != nil && cfSet.ContainsPrefix(prefix) {
-						isLiteASN = true
-					} else if cfFrontSet != nil && cfFrontSet.ContainsPrefix(prefix) {
-						isLiteASN = true
-					}
-				}
-
-				if isLiteASN {
-					asnMapLite[asnNum] = append(asnMapLite[asnNum], prefix)
-				}
+		for _, p := range chinaPrefixes {
+			countryFull["CN"] = append(countryFull["CN"], p)
+			if liteCountries["CN"] {
+				countryLite["CN"] = append(countryLite["CN"], p)
 			}
 		}
 	}
 
-	fmt.Printf("✅ Processed %d records in %v\n", rowCount, time.Since(startTime))
+	if cfSet != nil && len(countryFull["CN"]) > 0 {
+		var diff netipx.IPSetBuilder
+		for _, p := range countryFull["CN"] {
+			if !cfSet.ContainsPrefix(p) {
+				diff.AddPrefix(p)
+			}
+		}
+		cleanSet, _ := diff.IPSet()
+		countryFull["CN"] = cleanSet.Prefixes()
+		if liteCountries["CN"] {
+			countryLite["CN"] = cleanSet.Prefixes()
+		}
+	}
 
 	for _, s := range supplementAppleCIDRs {
 		if p, err := netip.ParsePrefix(s); err == nil {
@@ -271,6 +423,50 @@ func main() {
 		if p, err := netip.ParsePrefix(s); err == nil {
 			serviceFull["telegram"] = append(serviceFull["telegram"], p)
 			serviceLite["telegram"] = append(serviceLite["telegram"], p)
+			countryFull["NL"] = append(countryFull["NL"], p)
+		}
+	}
+
+	for _, s := range supplementSpotifyCIDRs {
+		if p, err := netip.ParsePrefix(s); err == nil {
+			serviceFull["spotify"] = append(serviceFull["spotify"], p)
+			serviceLite["spotify"] = append(serviceLite["spotify"], p)
+		}
+	}
+
+	for asnNum, targetCC := range preciseASNCountry {
+		prefixes := asnMap[asnNum]
+		if len(prefixes) == 0 {
+			continue
+		}
+		var b netipx.IPSetBuilder
+		for _, p := range prefixes {
+			b.AddPrefix(p)
+		}
+		targetSet, err := b.IPSet()
+		if err != nil {
+			continue
+		}
+
+		for cc, list := range countryFull {
+			if cc == targetCC {
+				continue
+			}
+			var builder netipx.IPSetBuilder
+			for _, p := range list {
+				builder.AddPrefix(p)
+			}
+			s, _ := builder.IPSet()
+			var diff netipx.IPSetBuilder
+			diff.AddSet(s)
+			diff.RemoveSet(targetSet)
+			cleanSet, _ := diff.IPSet()
+			countryFull[cc] = cleanSet.Prefixes()
+		}
+
+		countryFull[targetCC] = append(countryFull[targetCC], prefixes...)
+		if liteCountries[targetCC] {
+			countryLite[targetCC] = append(countryLite[targetCC], prefixes...)
 		}
 	}
 
@@ -290,14 +486,18 @@ func main() {
 
 	fmt.Println("📦 Building Country MMDB databases (Full & Lite)...")
 	mmdbFull, _ := mmdbwriter.New(mmdbwriter.Options{
-		DatabaseType: "GeoLite2-Country",
-		RecordSize:   24,
-		IPVersion:    6,
+		DatabaseType:            "GeoLite2-Country",
+		RecordSize:              24,
+		IPVersion:               6,
+		Inserter:                inserter.ReplaceWith,
+		IncludeReservedNetworks: true,
 	})
 	mmdbLite, _ := mmdbwriter.New(mmdbwriter.Options{
-		DatabaseType: "GeoLite2-Country",
-		RecordSize:   24,
-		IPVersion:    6,
+		DatabaseType:            "GeoLite2-Country",
+		RecordSize:              24,
+		IPVersion:               6,
+		Inserter:                inserter.ReplaceWith,
+		IncludeReservedNetworks: true,
 	})
 
 	for cc, prefixes := range countryFull {
@@ -309,12 +509,30 @@ func main() {
 			_ = mmdbFull.Insert(prefixToIPNet(p), record)
 		}
 	}
+	if privPrefixes, ok := serviceFull["private"]; ok {
+		record := mmdbtype.Map{
+			"country":            mmdbtype.Map{"iso_code": mmdbtype.String("PRIVATE")},
+			"registered_country": mmdbtype.Map{"iso_code": mmdbtype.String("PRIVATE")},
+		}
+		for _, p := range privPrefixes {
+			_ = mmdbFull.Insert(prefixToIPNet(p), record)
+		}
+	}
 	for cc, prefixes := range countryLite {
 		record := mmdbtype.Map{
 			"country":            mmdbtype.Map{"iso_code": mmdbtype.String(cc)},
 			"registered_country": mmdbtype.Map{"iso_code": mmdbtype.String(cc)},
 		}
 		for _, p := range prefixes {
+			_ = mmdbLite.Insert(prefixToIPNet(p), record)
+		}
+	}
+	if privPrefixes, ok := serviceLite["private"]; ok {
+		record := mmdbtype.Map{
+			"country":            mmdbtype.Map{"iso_code": mmdbtype.String("PRIVATE")},
+			"registered_country": mmdbtype.Map{"iso_code": mmdbtype.String("PRIVATE")},
+		}
+		for _, p := range privPrefixes {
 			_ = mmdbLite.Insert(prefixToIPNet(p), record)
 		}
 	}
@@ -361,9 +579,9 @@ func main() {
 	buildASNMMDB(filepath.Join(*outputDir, "GeoLite2-ASN.mmdb"), asnMap)
 	buildASNMMDB(filepath.Join(*outputDir, "GeoLite2-ASN-lite.mmdb"), asnMapLite)
 
-	fmt.Println("📦 Building MetaDB (Mihomo) and DB (Sing-box)...")
-	buildMetaAndSingDB(filepath.Join(*outputDir, "geoip.metadb"), filepath.Join(*outputDir, "geoip.db"), countryFull, serviceFull)
-	buildMetaAndSingDB(filepath.Join(*outputDir, "geoip-lite.metadb"), filepath.Join(*outputDir, "geoip-lite.db"), countryLite, serviceLite)
+	fmt.Println("📦 Building MetaDB (Mihomo)...")
+	buildMetaDB(filepath.Join(*outputDir, "geoip.metadb"), countryFull, serviceFull)
+	buildMetaDB(filepath.Join(*outputDir, "geoip-lite.metadb"), countryLite, serviceLite)
 
 	fmt.Println("📦 Building V2Ray geoip.dat (Full & Lite)...")
 	geoipDatFull := buildV2RayGeoIPList(countryFull, serviceFull)
@@ -379,17 +597,9 @@ func main() {
 	fmt.Printf("🎉 All GeoIP & ASN assets successfully built in %v!\n", time.Since(startTime))
 }
 
-func buildMetaAndSingDB(metaPath, singPath string, countryMap, serviceMap map[string][]netip.Prefix) {
+func buildMetaDB(metaPath string, countryMap, serviceMap map[string][]netip.Prefix) {
 	writerMeta, _ := mmdbwriter.New(mmdbwriter.Options{
 		DatabaseType:            "Meta-geoip0",
-		IPVersion:               6,
-		RecordSize:              24,
-		Inserter:                inserter.ReplaceWith,
-		DisableIPv4Aliasing:     true,
-		IncludeReservedNetworks: true,
-	})
-	writerSing, _ := mmdbwriter.New(mmdbwriter.Options{
-		DatabaseType:            "sing-geoip",
 		IPVersion:               6,
 		RecordSize:              24,
 		Inserter:                inserter.ReplaceWith,
@@ -427,18 +637,16 @@ func buildMetaAndSingDB(metaPath, singPath string, countryMap, serviceMap map[st
 	for _, p := range included {
 		ipNet := prefixToIPNet(p)
 		codes := codeMap[p]
-		
-		_ = writerSing.Insert(ipNet, mmdbtype.String(codes[len(codes)-1]))
 
 		_, existingRecord := writerMeta.Get(ipNet.IP)
-		
+
 		var newSlice []mmdbtype.DataType
 		if s, ok := existingRecord.(mmdbtype.String); ok {
 			newSlice = append(newSlice, s)
 		} else if sl, ok := existingRecord.(mmdbtype.Slice); ok {
 			newSlice = append(newSlice, sl...)
 		}
-		
+
 		for _, c := range codes {
 			newSlice = append(newSlice, mmdbtype.String(c))
 		}
@@ -468,10 +676,6 @@ func buildMetaAndSingDB(metaPath, singPath string, countryMap, serviceMap map[st
 		_, _ = writerMeta.WriteTo(f)
 		f.Close()
 	}
-	if f, err := os.Create(singPath); err == nil {
-		_, _ = writerSing.WriteTo(f)
-		f.Close()
-	}
 }
 
 func fetchCloudflareIPs() []netip.Prefix {
@@ -489,6 +693,11 @@ func fetchCloudflareIPs() []netip.Prefix {
 		if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && res.Success {
 			var prefixes []netip.Prefix
 			for _, s := range append(res.Result.IPv4CIDRs, res.Result.IPv6CIDRs...) {
+				if p, err := netip.ParsePrefix(s); err == nil {
+					prefixes = append(prefixes, p)
+				}
+			}
+			for _, s := range []string{"1.1.1.0/24", "1.0.0.0/24", "162.159.36.0/24", "162.159.46.0/24", "2606:4700:4700::/48", "2606:4700:4701::/48"} {
 				if p, err := netip.ParsePrefix(s); err == nil {
 					prefixes = append(prefixes, p)
 				}

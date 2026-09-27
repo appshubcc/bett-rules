@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/metacubex/geo/convert"
 	"github.com/metacubex/geo/encoding/v2raygeo"
 	"google.golang.org/protobuf/proto"
 )
@@ -599,12 +598,6 @@ func main() {
 	datPath := filepath.Join(*outputDir, "geosite.dat")
 	_ = os.WriteFile(datPath, protoDataFull, 0644)
 
-	dbPath := filepath.Join(*outputDir, "geosite.db")
-	if dbFile, err := os.Create(dbPath); err == nil {
-		_ = convert.V2RaySiteToSing(siteListFull, dbFile)
-		dbFile.Close()
-	}
-
 	fmt.Println("🧩 Compiling Lite GeoSite entries...")
 	var siteListLite []*v2raygeo.GeoSite
 
@@ -709,12 +702,6 @@ func main() {
 	protoDataLite, _ := proto.Marshal(&v2raygeo.GeoSiteList{Entry: siteListLite})
 	datLitePath := filepath.Join(*outputDir, "geosite-lite.dat")
 	_ = os.WriteFile(datLitePath, protoDataLite, 0644)
-
-	dbLitePath := filepath.Join(*outputDir, "geosite-lite.db")
-	if dbLiteFile, err := os.Create(dbLitePath); err == nil {
-		_ = convert.V2RaySiteToSing(siteListLite, dbLiteFile)
-		dbLiteFile.Close()
-	}
 
 	fmt.Printf("🎉 All GeoSite assets successfully built in %v!\n", time.Since(startTime))
 }
