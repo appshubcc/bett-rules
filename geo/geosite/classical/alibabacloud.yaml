@@ -1,0 +1,7 @@
+payload:
+    - DOMAIN-SUFFIX,alibabacloud.co.in
+    - DOMAIN-SUFFIX,alicloud.com
+    - DOMAIN,account-cn.alibabacloud.com
+    - DOMAIN,api.alibabacloud.com
+    - DOMAIN,cn.alibabacloud.com
+    - DOMAIN,status.alibabacloud.com
