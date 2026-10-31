@@ -13,3 +13,11 @@ tencentsuite.com
 tencentmeeting.com
 tripcdn.com
 wxworklive.com
+arpa
+3gppnetwork.org
+gwfb.net
+data4.net
+smartgslb.com
+huaweicloud-dns.net
+huaweicloud-dns.org
+ztedevices.com
