@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "dbankcloud.ru",
+        "huaweicloud-dns.net",
+        "huaweicloud-dns.org"
+      ]
+    }
+  ]
+}
