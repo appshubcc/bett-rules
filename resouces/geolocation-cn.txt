@@ -7,7 +7,7 @@ cn.samsungapps.com
 
 # Microsoft China (Microsoft Beijing & Domestic CDN)
 cn.bing.com
-download.windowsupdate.com
+windowsupdate.com
 
 # Sony PlayStation China CDN (China Mobile)
 gs2.ww.prod.dl.playstation.net

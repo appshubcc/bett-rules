@@ -4,8 +4,8 @@
 *.dll
 *.so
 *.dylib
-build-geoip
-build-geosite
+/build-geoip
+/build-geosite
 
 # Build outputs
 publish/
@@ -28,3 +28,7 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Local markdown files (keep README.md tracked)
+*.md
+!README.md
