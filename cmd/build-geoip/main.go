@@ -379,15 +379,10 @@ func main() {
 			for _, p := range countryFull[cc] {
 				builder.AddPrefix(p)
 			}
-			s, _ := builder.IPSet()
-			var diff netipx.IPSetBuilder
-			for _, p := range s.Prefixes() {
-				if !chinaSet.Contains(p.Addr()) {
-					diff.AddPrefix(p)
-				}
+			builder.RemoveSet(chinaSet)
+			if cleanSet, err := builder.IPSet(); err == nil {
+				countryFull[cc] = cleanSet.Prefixes()
 			}
-			cleanSet, _ := diff.IPSet()
-			countryFull[cc] = cleanSet.Prefixes()
 		}
 
 		for _, p := range chinaPrefixes {
@@ -401,14 +396,14 @@ func main() {
 	if cfSet != nil && len(countryFull["CN"]) > 0 {
 		var diff netipx.IPSetBuilder
 		for _, p := range countryFull["CN"] {
-			if !cfSet.ContainsPrefix(p) {
-				diff.AddPrefix(p)
-			}
+			diff.AddPrefix(p)
 		}
-		cleanSet, _ := diff.IPSet()
-		countryFull["CN"] = cleanSet.Prefixes()
-		if liteCountries["CN"] {
-			countryLite["CN"] = cleanSet.Prefixes()
+		diff.RemoveSet(cfSet)
+		if cleanSet, err := diff.IPSet(); err == nil {
+			countryFull["CN"] = cleanSet.Prefixes()
+			if liteCountries["CN"] {
+				countryLite["CN"] = cleanSet.Prefixes()
+			}
 		}
 	}
 
@@ -419,12 +414,31 @@ func main() {
 		}
 	}
 
+	var tgSuppBuilder netipx.IPSetBuilder
+	var tgSuppPrefixes []netip.Prefix
 	for _, s := range supplementTelegramCIDRs {
 		if p, err := netip.ParsePrefix(s); err == nil {
 			serviceFull["telegram"] = append(serviceFull["telegram"], p)
 			serviceLite["telegram"] = append(serviceLite["telegram"], p)
-			countryFull["NL"] = append(countryFull["NL"], p)
+			tgSuppBuilder.AddPrefix(p)
+			tgSuppPrefixes = append(tgSuppPrefixes, p)
 		}
+	}
+	if tgSuppSet, err := tgSuppBuilder.IPSet(); err == nil && len(tgSuppPrefixes) > 0 {
+		for cc, list := range countryFull {
+			if cc == "NL" {
+				continue
+			}
+			var builder netipx.IPSetBuilder
+			for _, p := range list {
+				builder.AddPrefix(p)
+			}
+			builder.RemoveSet(tgSuppSet)
+			if cleanSet, err := builder.IPSet(); err == nil {
+				countryFull[cc] = cleanSet.Prefixes()
+			}
+		}
+		countryFull["NL"] = append(countryFull["NL"], tgSuppPrefixes...)
 	}
 
 	for _, s := range supplementSpotifyCIDRs {
@@ -456,12 +470,10 @@ func main() {
 			for _, p := range list {
 				builder.AddPrefix(p)
 			}
-			s, _ := builder.IPSet()
-			var diff netipx.IPSetBuilder
-			diff.AddSet(s)
-			diff.RemoveSet(targetSet)
-			cleanSet, _ := diff.IPSet()
-			countryFull[cc] = cleanSet.Prefixes()
+			builder.RemoveSet(targetSet)
+			if cleanSet, err := builder.IPSet(); err == nil {
+				countryFull[cc] = cleanSet.Prefixes()
+			}
 		}
 
 		countryFull[targetCC] = append(countryFull[targetCC], prefixes...)
@@ -478,10 +490,18 @@ func main() {
 		countryLite[cc] = mergePrefixes(list)
 	}
 	for tag, list := range serviceFull {
-		serviceFull[tag] = mergePrefixes(list)
+		if requireNonCN[tag] && chinaSet != nil {
+			serviceFull[tag] = mergePrefixesExclude(list, chinaSet)
+		} else {
+			serviceFull[tag] = mergePrefixes(list)
+		}
 	}
 	for tag, list := range serviceLite {
-		serviceLite[tag] = mergePrefixes(list)
+		if requireNonCN[tag] && chinaSet != nil {
+			serviceLite[tag] = mergePrefixesExclude(list, chinaSet)
+		} else {
+			serviceLite[tag] = mergePrefixes(list)
+		}
 	}
 
 	fmt.Println("📦 Building Country MMDB databases (Full & Lite)...")
@@ -579,9 +599,9 @@ func main() {
 	buildASNMMDB(filepath.Join(*outputDir, "GeoLite2-ASN.mmdb"), asnMap)
 	buildASNMMDB(filepath.Join(*outputDir, "GeoLite2-ASN-lite.mmdb"), asnMapLite)
 
-	fmt.Println("📦 Building MetaDB (Mihomo)...")
-	buildMetaDB(filepath.Join(*outputDir, "geoip.metadb"), countryFull, serviceFull)
-	buildMetaDB(filepath.Join(*outputDir, "geoip-lite.metadb"), countryLite, serviceLite)
+	fmt.Println("📦 Building MetaDB (Mihomo) and DB (Sing-box)...")
+	buildMetaAndSingDB(filepath.Join(*outputDir, "geoip.metadb"), filepath.Join(*outputDir, "geoip.db"), countryFull, serviceFull)
+	buildMetaAndSingDB(filepath.Join(*outputDir, "geoip-lite.metadb"), filepath.Join(*outputDir, "geoip-lite.db"), countryLite, serviceLite)
 
 	fmt.Println("📦 Building V2Ray geoip.dat (Full & Lite)...")
 	geoipDatFull := buildV2RayGeoIPList(countryFull, serviceFull)
@@ -597,9 +617,35 @@ func main() {
 	fmt.Printf("🎉 All GeoIP & ASN assets successfully built in %v!\n", time.Since(startTime))
 }
 
-func buildMetaDB(metaPath string, countryMap, serviceMap map[string][]netip.Prefix) {
+func buildMetaAndSingDB(metaPath, singPath string, countryMap, serviceMap map[string][]netip.Prefix) {
+	langSet := make(map[string]bool)
+	for cc, prefixes := range countryMap {
+		if len(prefixes) > 0 {
+			langSet[strings.ToLower(cc)] = true
+		}
+	}
+	for tag, prefixes := range serviceMap {
+		if len(prefixes) > 0 {
+			langSet[strings.ToLower(tag)] = true
+		}
+	}
+	var languages []string
+	for k := range langSet {
+		languages = append(languages, k)
+	}
+	sort.Strings(languages)
+
 	writerMeta, _ := mmdbwriter.New(mmdbwriter.Options{
 		DatabaseType:            "Meta-geoip0",
+		IPVersion:               6,
+		RecordSize:              24,
+		Inserter:                inserter.ReplaceWith,
+		DisableIPv4Aliasing:     true,
+		IncludeReservedNetworks: true,
+	})
+	writerSing, _ := mmdbwriter.New(mmdbwriter.Options{
+		DatabaseType:            "sing-geoip",
+		Languages:               languages,
 		IPVersion:               6,
 		RecordSize:              24,
 		Inserter:                inserter.ReplaceWith,
@@ -638,6 +684,8 @@ func buildMetaDB(metaPath string, countryMap, serviceMap map[string][]netip.Pref
 		ipNet := prefixToIPNet(p)
 		codes := codeMap[p]
 
+		_ = writerSing.Insert(ipNet, mmdbtype.String(codes[len(codes)-1]))
+
 		_, existingRecord := writerMeta.Get(ipNet.IP)
 
 		var newSlice []mmdbtype.DataType
@@ -674,6 +722,10 @@ func buildMetaDB(metaPath string, countryMap, serviceMap map[string][]netip.Pref
 
 	if f, err := os.Create(metaPath); err == nil {
 		_, _ = writerMeta.WriteTo(f)
+		f.Close()
+	}
+	if f, err := os.Create(singPath); err == nil {
+		_, _ = writerSing.WriteTo(f)
 		f.Close()
 	}
 }
@@ -768,6 +820,21 @@ func mergePrefixes(prefixes []netip.Prefix) []netip.Prefix {
 	var builder netipx.IPSetBuilder
 	for _, p := range prefixes {
 		builder.AddPrefix(p)
+	}
+	s, err := builder.IPSet()
+	if err != nil {
+		return prefixes
+	}
+	return s.Prefixes()
+}
+
+func mergePrefixesExclude(prefixes []netip.Prefix, excludeSet *netipx.IPSet) []netip.Prefix {
+	var builder netipx.IPSetBuilder
+	for _, p := range prefixes {
+		builder.AddPrefix(p)
+	}
+	if excludeSet != nil {
+		builder.RemoveSet(excludeSet)
 	}
 	s, err := builder.IPSet()
 	if err != nil {

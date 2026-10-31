@@ -21,7 +21,7 @@ jobs:
           echo "CACHE_DATE=$(TZ=Asia/Shanghai date +'%Y%m%d')" >> $GITHUB_ENV
           echo "CHINA_DOMAINS_URL=https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf" >> $GITHUB_ENV
           echo "GOOGLE_DOMAINS_URL=https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/google.china.conf" >> $GITHUB_ENV
-          echo "APPLE_DOMAINS_URL=https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/apple.china.conf" >> $GITHUB_ENV          # echo "CUSTOM_DIRECT=https://raw.githubusercontent.com/Loyalsoldier/domain-list-custom/release/cn.txt" >> $GITHUB_ENV
+          echo "APPLE_DOMAINS_URL=https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/apple.china.conf" >> $GITHUB_ENV
           echo "CUSTOM_DIRECT=https://raw.githubusercontent.com/Loyalsoldier/domain-list-custom/release/cn.txt" >> $GITHUB_ENV
           echo "CUSTOM_PROXY=https://raw.githubusercontent.com/Loyalsoldier/domain-list-custom/release/geolocation-!cn.txt" >> $GITHUB_ENV
           echo "WIN_SPY=https://raw.githubusercontent.com/crazy-max/WindowsSpyBlocker/master/data/hosts/spy.txt" >> $GITHUB_ENV
@@ -77,7 +77,6 @@ jobs:
         run: |
           cat ./gfwlist2dnsmasq/temp-gfwlist.txt | perl -ne '/^((?=^.{3,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})+)/ && print "$1\n"' > temp-proxy.txt
           curl -sSL $GOOGLE_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "$1\n"' >> temp-proxy.txt
-          curl -sSL $APPLE_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "$1\n"' >> temp-proxy.txt
           curl -sSL ${CUSTOM_PROXY} | grep -Ev ":@cn" | perl -ne '/^(domain):([^:]+)(\n$|:@.+)/ && print "$2\n"' >> temp-proxy.txt
 
       - name: Reserve `full`, `regexp` and `keyword` type of rules from custom lists to "reserve" files
@@ -120,27 +119,28 @@ jobs:
           python ./resouces/removeFrom.py -remove ./resouces/proxy-need-to-remove.txt -from ./proxy-reserve.txt -out ./proxy-reserve.tmp && mv ./proxy-reserve.tmp ./proxy-reserve.txt
           python ./resouces/removeFrom.py -remove ./resouces/reject-need-to-remove.txt -from ./reject-list-without-redundant -out ./temp-reject.txt
           cat ./temp-reject.txt >> ./community/data/category-ads
+          python ./resouces/removeFrom.py -remove ./resouces/reject-need-to-remove.txt --clean-ads-dir ./community/data
 
           # Inject verified domestic assets into geolocation-cn
           [ -f "./resouces/geolocation-cn.txt" ] && cat ./resouces/geolocation-cn.txt >> ./community/data/geolocation-cn
 
           # Remove shadowing parent domains from community/data categories
-          sed -i '/^myhuaweicloud\.com$/d' ./community/data/huaweicloud
-          sed -i '/^cdn20\.com$/d' ./community/data/wangsu
-          sed -i '/^alibabacloud\.com/d' ./community/data/alibabacloud
-          sed -i '/^oss-cn-hongkong\.aliyuncs\.com/d' ./community/data/aliyun
           if [ -f "./resouces/cn-need-to-remove.txt" ]; then
-            python ./resouces/removeFrom.py -remove ./resouces/cn-need-to-remove.txt -from ./community/data/geolocation-cn -out ./community/data/geolocation-cn.tmp
-            mv ./community/data/geolocation-cn.tmp ./community/data/geolocation-cn
+            for cat_file in geolocation-cn huaweicloud wangsu alibabacloud aliyun; do
+              if [ -f "./community/data/${cat_file}" ]; then
+                python ./resouces/removeFrom.py -remove ./resouces/cn-need-to-remove.txt -from "./community/data/${cat_file}" -out "./community/data/${cat_file}.tmp"
+                mv "./community/data/${cat_file}.tmp" "./community/data/${cat_file}"
+              fi
+            done
           fi
 
       - name: Deduplicate and optimize `cn` and `geolocation-!cn` lists with TLD rules
         run: |
           cat temp-cn.txt | grep -v google | grep -v manhua | grep -v ooklaserver | grep -v "acg.rip" | sort --ignore-case -u | perl -ne '/^((?=^.{1,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})*)/ && print "$1\n"' > temp-cn-sorted.txt
-          python ./resouces/dedupTLD.py --mode cn --input temp-cn-sorted.txt --output ./community/data/cn --tld-cn ./resouces/tld-cn.txt --tld-not-cn ./resouces/tld-not-cn.txt
+          python ./resouces/dedupTLD.py --mode cn --input temp-cn-sorted.txt --output ./community/data/cn --tld-cn ./resouces/tld-cn.txt --tld-not-cn ./resouces/tld-not-cn.txt --direct ./resouces/direct.txt --remove ./resouces/direct-need-to-remove.txt
 
           cat temp-geolocation-\!cn.txt | sort --ignore-case -u | perl -ne '/^((?=^.{1,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})*)/ && print "$1\n"' > temp-proxy-sorted.txt
-          python ./resouces/dedupTLD.py --mode proxy --input temp-proxy-sorted.txt --output ./community/data/geolocation-\!cn --tld-not-cn ./resouces/tld-not-cn.txt --tld-cn ./resouces/tld-cn.txt --reserve proxy-reserve.txt --remove ./resouces/proxy-need-to-remove.txt
+          python ./resouces/dedupTLD.py --mode proxy --input temp-proxy-sorted.txt --output ./community/data/geolocation-\!cn --tld-not-cn ./resouces/tld-not-cn.txt --tld-cn ./resouces/tld-cn.txt --reserve proxy-reserve.txt --remove ./resouces/proxy-need-to-remove.txt --cn-list ./community/data/cn
 
       - name: Add `full`, `regexp` and `keyword` type of rules back into "cn", and "geolocation-!cn" list
         run: |
@@ -153,30 +153,35 @@ jobs:
         run: |
           curl -sSL $GOOGLE_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "full:$1\n"' > ./community/data/google-cn
           curl -sSL $APPLE_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "full:$1\n"' > ./community/data/apple-cn
-          cat ./gfwlist2dnsmasq/temp-gfwlist.txt | perl -ne '/^((?=^.{3,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})+)/ && print "$1\n"' >> ./community/data/gfw
+          cat ./gfwlist2dnsmasq/temp-gfwlist.txt ./resouces/proxy.txt | perl -ne '/^((?=^.{3,255})[a-zA-Z0-9][-_a-zA-Z0-9]{0,62}(\.[a-zA-Z0-9][-_a-zA-Z0-9]{0,62})+)/ && print "$1\n"' | sort --ignore-case -u > ./gfw-raw.tmp
+          python ./resouces/findRedundantDomain.py ./gfw-raw.tmp ./gfw-redundant.tmp
+          [ ! -f "./gfw-redundant.tmp" ] && touch ./gfw-redundant.tmp
+          sort ./gfw-redundant.tmp > ./gfw-redundant-sort.tmp
+          python ./resouces/removeFrom.py -remove ./gfw-redundant-sort.tmp -from ./gfw-raw.tmp -out ./gfw-dedup.tmp
+          python ./resouces/removeFrom.py -remove ./resouces/proxy-need-to-remove.txt -from ./gfw-dedup.tmp -out ./community/data/gfw
+          rm -f ./gfw-raw.tmp ./gfw-redundant.tmp ./gfw-redundant-sort.tmp ./gfw-dedup.tmp
           curl -sSL $WIN_SPY | grep "0.0.0.0" | awk '{print $2}' > ./community/data/win-spy
           curl -sSL $WIN_UPDATE | grep "0.0.0.0" | awk '{print $2}' > ./community/data/win-update
           curl -sSL $WIN_EXTRA | grep "0.0.0.0" | awk '{print $2}' > ./community/data/win-extra
 
       - name: merge 'ios_rule_script/SteamCN'
-        env:
-          SED: sed '/^\s*#/d' | sed 's/DOMAIN,//g' | sed 's/DOMAIN-SUFFIX,//g' | sed 's/DOMAIN-KEYWORD,/keyword:/g'
         run: |
-          curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/SteamCN/SteamCN.list | ${{ env.SED }} > steamcn.txt
-          while read line; do grep -q "$line @cn" ./community/data/steam || sed -i "/$line/ s/$/ @cn/" ./community/data/steam; done < steamcn.txt
+          curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/SteamCN/SteamCN.list | perl -ne 's/^\s*-\s*//; s/["\x27]//g; if (/^DOMAIN(?:-SUFFIX)?,([^\s,#]+)/) { print "$1\n" } elsif (/^DOMAIN-KEYWORD,([^\s,#]+)/) { print "keyword:$1\n" }' > steamcn.txt
+          while read line; do [ -n "$line" ] && (grep -q "$line @cn" ./community/data/steam || sed -i "/$line/ s/$/ @cn/" ./community/data/steam); done < steamcn.txt
           cat ./community/data/steam
 
       - name: Add data for `meta`
-        env:
-          SED: sed '/^\s*#/d' | sed 's/^PROCESS-NAME,//' | sed 's/DOMAIN,/full:/g' | sed 's/DOMAIN-SUFFIX,//g' | sed 's/DOMAIN-KEYWORD,/keyword:/g' | sed '/^\s*IP-CIDR/d'
         run: |
+          parse_clash() {
+            perl -ne 's/^\s*-\s*//; s/["\x27]//g; if (/^DOMAIN,([^\s,#]+)/) { print "full:$1\n" } elsif (/^DOMAIN-SUFFIX,([^\s,#]+)/) { print "$1\n" } elsif (/^DOMAIN-KEYWORD,([^\s,#]+)/) { print "keyword:$1\n" }'
+          }
           curl -sSL https://raw.githubusercontent.com/xishang0128/rules/main/biliintl.list > ./community/data/biliintl
-          curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/OneDrive/OneDrive.list | ${{ env.SED }} > ./community/data/onedrive
+          curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/OneDrive/OneDrive.list | parse_clash > ./community/data/onedrive
           echo "sharepoint.cn" >> ./community/data/onedrive 
           curl -sSL https://raw.githubusercontent.com/xishang0128/rules/main/sharepoint.list > ./community/data/sharepoint
-          curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/PrivateTracker/PrivateTracker.list | ${{ env.SED }} > ./community/data/tracker
+          curl -sSL https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/PrivateTracker/PrivateTracker.list | parse_clash > ./community/data/tracker
           curl -sSL https://gitea.com/XIU2/TrackersListCollection/raw/branch/master/all.txt | grep -i "\.[A-Z]" | grep -v tracker | sed 's/^.*\/\///g' | sed 's/:.*\/.*//g' >> ./community/data/tracker
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/BlockHttpDNS/BlockHttpDNS.list | ${{ env.SED }} > ./community/data/httpdns
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/BlockHttpDNS/BlockHttpDNS.list | parse_clash > ./community/data/httpdns
           echo "zed.dev" >> ./community/data/category-dev
           python ./resouces/formatFakeIP.py ./resouces/fakeip-filter.txt ./community/data/fakeip-filter
 
@@ -191,31 +196,36 @@ jobs:
         run: |
           cd community || exit 1
           mkdir -p data-lite
+          parse_clash() {
+            perl -ne 's/^\s*-\s*//; s/["\x27]//g; if (/^DOMAIN,([^\s,#]+)/) { print "full:$1\n" } elsif (/^DOMAIN-SUFFIX,([^\s,#]+)/) { print "$1\n" } elsif (/^DOMAIN-KEYWORD,([^\s,#]+)/) { print "keyword:$1\n" }'
+          }
           curl -sSL https://raw.githubusercontent.com/xishang0128/rules/main/biliintl.list > ./data-lite/biliintl
           curl -sSL https://github.com/v2fly/domain-list-community/raw/master/data/ehentai > ./data-lite/ehentai
           curl -sSL https://github.com/v2fly/domain-list-community/raw/master/data/private > ./data-lite/private
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/AbemaTV/AbemaTV.yaml | ${{ env.SED }} > ./data-lite/abema
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Apple/Apple_Classical.yaml | ${{ env.SED }} > ./data-lite/apple
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/AppleMusic/AppleMusic.yaml | ${{ env.SED }} > ./data-lite/applemusic
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/BiliBili/BiliBili.yaml | ${{ env.SED }} > ./data-lite/bilibili
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Bahamut/Bahamut.yaml | ${{ env.SED }} > ./data-lite/bahamut
-          curl -sSL $CHINA_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "$1\n"' | grep -v "acg.rip" | sort --ignore-case -u > ./data-lite/cn-raw
-          python ../resouces/dedupTLD.py --mode cn --input ./data-lite/cn-raw --output ./data-lite/cn --tld-cn ../resouces/tld-cn.txt --tld-not-cn ../resouces/tld-not-cn.txt --direct ../resouces/direct.txt
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Cloudflare/Cloudflare.yaml | ${{ env.SED }} > ./data-lite/cloudflare
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Google/Google.yaml | ${{ env.SED }} > ./data-lite/google
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/GitHub/GitHub.yaml | ${{ env.SED }} > ./data-lite/github
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Microsoft/Microsoft.yaml | ${{ env.SED }} > ./data-lite/microsoft
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Netflix/Netflix.yaml | ${{ env.SED }} > ./data-lite/netflix
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/OpenAI/OpenAI.yaml | ${{ env.SED }} > ./data-lite/openai
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/OneDrive/OneDrive.yaml | ${{ env.SED }} > ./data-lite/onedrive
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Pixiv/Pixiv.yaml | ${{ env.SED }} > ./data-lite/pixiv
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/ProxyLite/ProxyLite.yaml | ${{ env.SED }} > ./data-lite/proxy
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Spotify/Spotify.yaml | ${{ env.SED }} > ./data-lite/spotify
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Telegram/Telegram.yaml | ${{ env.SED }} > ./data-lite/telegram
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Twitter/Twitter.yaml | ${{ env.SED }} > ./data-lite/twitter
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/TikTok/TikTok.yaml | ${{ env.SED }} > ./data-lite/tiktok
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/YouTube/YouTube.yaml | ${{ env.SED }} > ./data-lite/youtube
-          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/GlobalMedia/GlobalMedia.yaml | ${{ env.SED }} > ./data-lite/proxymedia
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/AbemaTV/AbemaTV.yaml | parse_clash > ./data-lite/abema
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Apple/Apple_Classical.yaml | parse_clash > ./data-lite/apple
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/AppleMusic/AppleMusic.yaml | parse_clash > ./data-lite/applemusic
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/BiliBili/BiliBili.yaml | parse_clash > ./data-lite/bilibili
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Bahamut/Bahamut.yaml | parse_clash > ./data-lite/bahamut
+          curl -sSL $CHINA_DOMAINS_URL | perl -ne '/^server=\/([^\/]+)\// && print "$1\n"' | grep -v "acg.rip" | sort --ignore-case -u > ./cn-raw.tmp
+          python ../resouces/dedupTLD.py --mode cn --input ./cn-raw.tmp --output ./data-lite/cn --tld-cn ../resouces/tld-cn.txt --tld-not-cn ../resouces/tld-not-cn.txt --direct ../resouces/direct.txt --remove ../resouces/direct-need-to-remove.txt
+          rm -f ./cn-raw.tmp
+          [ -f "../resouces/geolocation-cn.txt" ] && cat ../resouces/geolocation-cn.txt >> ./data-lite/cn
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Cloudflare/Cloudflare.yaml | parse_clash > ./data-lite/cloudflare
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Google/Google.yaml | parse_clash > ./data-lite/google
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/GitHub/GitHub.yaml | parse_clash > ./data-lite/github
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Microsoft/Microsoft.yaml | parse_clash > ./data-lite/microsoft
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Netflix/Netflix.yaml | parse_clash > ./data-lite/netflix
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/OpenAI/OpenAI.yaml | parse_clash > ./data-lite/openai
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/OneDrive/OneDrive.yaml | parse_clash > ./data-lite/onedrive
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Pixiv/Pixiv.yaml | parse_clash > ./data-lite/pixiv
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/ProxyLite/ProxyLite.yaml | parse_clash > ./data-lite/proxy
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Spotify/Spotify.yaml | parse_clash > ./data-lite/spotify
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Telegram/Telegram.yaml | parse_clash > ./data-lite/telegram
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/Twitter/Twitter.yaml | parse_clash > ./data-lite/twitter
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/TikTok/TikTok.yaml | parse_clash > ./data-lite/tiktok
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/YouTube/YouTube.yaml | parse_clash > ./data-lite/youtube
+          curl -sSL https://github.com/blackmatrix7/ios_rule_script/raw/master/rule/Clash/GlobalMedia/GlobalMedia.yaml | parse_clash > ./data-lite/proxymedia
 
           echo include:google >> ./data-lite/proxy && echo include:github >> ./data-lite/proxy && echo include:netflix >> ./data-lite/proxy
           echo ipleak.net >> ./data-lite/proxy && echo browserleaks.org >> ./data-lite/proxy
@@ -289,6 +299,14 @@ jobs:
             -asn-v6 ./IP2LOCATION-LITE-ASN.IPV6.CSV \
             -china-ip ./china46.txt \
             -out ./publish
+
+      - name: Build geosite db files
+        env:
+          NO_SKIP: true
+        run: |
+          go install -trimpath -ldflags="-s -w -buildid=" github.com/metacubex/geo/cmd/geo@master
+          geo convert site -i v2ray -o sing -f ./publish/geosite.db ./custom/publish/geosite.dat
+          geo convert site -i v2ray -o sing -f ./publish/geosite-lite.db ./community/geosite-lite.dat
 
       - name: Convert geo to sing-rule-set
         env:
@@ -382,6 +400,10 @@ jobs:
           sha256sum geoip.dat > geoip.dat.sha256sum
           sha256sum geosite.dat > geosite.dat.sha256sum
           sha256sum geosite-lite.dat > geosite-lite.dat.sha256sum
+          sha256sum geosite.db > geosite.db.sha256sum
+          sha256sum geosite-lite.db > geosite-lite.db.sha256sum
+          sha256sum geoip.db > geoip.db.sha256sum
+          sha256sum geoip-lite.db > geoip-lite.db.sha256sum
           sha256sum geoip.metadb > geoip.metadb.sha256sum
           sha256sum geoip-lite.metadb > geoip-lite.metadb.sha256sum
           sha256sum BundleMRS.7z > BundleMRS.7z.sha256sum
