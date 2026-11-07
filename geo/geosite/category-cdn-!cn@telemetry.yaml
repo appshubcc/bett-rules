@@ -1,0 +1,4 @@
+payload:
+    - +.cloudflareinsights.com
+    - +.cloudflareinsights-cn.com
+    - +.akstat.io
