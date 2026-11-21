@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "ad.m.iqiyi.com",
+        "afp.iqiyi.com",
+        "c.uaa.iqiyi.com",
+        "cupid.iqiyi.com",
+        "ifacelog.iqiyi.com",
+        "mbdlog.iqiyi.com"
+      ]
+    }
+  ]
+}

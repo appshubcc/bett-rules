@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "71.am",
+        "iqiyi.com",
+        "iqiyipic.com",
+        "pps.tv",
+        "ppsimg.com",
+        "qiyi.com",
+        "qiyipic.com",
+        "qy.net",
+        "71edge.com",
+        "iq.com",
+        "ad.m.iqiyi.com",
+        "afp.iqiyi.com",
+        "c.uaa.iqiyi.com",
+        "cupid.iqiyi.com",
+        "ifacelog.iqiyi.com",
+        "mbdlog.iqiyi.com"
+      ]
+    }
+  ]
+}
